@@ -6,28 +6,28 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.core.os_manager import ChromeType
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# === 브라우저 설정 (클라우드 호환) ===
+# === 브라우저 설정 (자동 감지 모드) ===
 def get_driver():
     options = Options()
-    # 클라우드에서는 창을 띄울 수 없으므로 headless 모드 필수
-    options.add_argument("--headless") 
+    options.add_argument("--headless") # 화면 없이 실행 (필수)
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
     
-    # 로컬/클라우드 환경 자동 감지
-    try:
-        # 클라우드 환경 (Chromium)
-        service = Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
+    # [중요] 클라우드 환경인지 확인하는 로직
+    # Streamlit Cloud에는 '/usr/bin/chromium'에 브라우저가 설치됩니다.
+    if os.path.exists("/usr/bin/chromium"):
+        options.binary_location = "/usr/bin/chromium"
+        # 패키지로 설치된 드라이버를 직접 지정
+        service = Service("/usr/bin/chromedriver")
         driver = webdriver.Chrome(service=service, options=options)
-    except:
-        # 로컬 환경 (일반 Chrome)
+    else:
+        # 내 컴퓨터(Windows)에서는 다운로드 방식 사용
+        from webdriver_manager.chrome import ChromeDriverManager
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
         
@@ -174,7 +174,6 @@ st.title("🚢 부산항 통합 모선 조회")
 with st.form("search"):
     c1, c2 = st.columns([3, 1])
     with c1:
-        # 빈칸으로 시작
         vessel_input = st.text_input("모선명", value="")
     with c2:
         st.write("")
