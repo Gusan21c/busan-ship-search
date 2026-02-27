@@ -44,7 +44,7 @@ def get_driver():
         
     return driver
 
-# === 1. 허치슨 (북항 - 건드리지 않음) ===
+# === 1. 허치슨 (북항) ===
 def search_hktl(driver, target_vessel):
     url = "https://custom.hktl.com/jsp/T01/sunsuk.jsp"
     results = []
@@ -99,7 +99,7 @@ def search_hktl(driver, target_vessel):
         if key not in seen: seen.add(key); unique.append(r)
     return unique
 
-# === 2. BPT (북항 - 건드리지 않음) ===
+# === 2. BPT (북항) ===
 def search_bpt(driver, target_vessel, debug_log):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -126,7 +126,7 @@ def search_bpt(driver, target_vessel, debug_log):
                     if(btns[i].innerText && btns[i].innerText.includes('조회')) { btns[i].click(); return; }
                 }
             """)
-        except Exception as e: pass
+        except: pass
         time.sleep(2)
 
         try:
@@ -277,7 +277,7 @@ def search_hjnc(driver, target_vessel, debug_log):
         key = r['모선명'] + r['접안일시']
         if key not in seen: seen.add(key); unique.append(r)
     return unique
-    
+
 # === UI ===
 st.set_page_config(page_title="부산항 통합 조회", page_icon="🚢", layout="wide")
 st.title("🚢 부산항(북항+신항) 통합 조회기")
@@ -339,5 +339,3 @@ if btn:
                 st.error(f"'{vessel_input}' 스케줄을 찾지 못했습니다.")
         except Exception as e:
             st.error(f"오류가 발생했습니다: {e}")
-
-
