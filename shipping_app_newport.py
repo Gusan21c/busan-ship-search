@@ -233,10 +233,111 @@ def search_dgt(driver, target_vessel):
             unique.append(r)
     return unique
 
+# === 3. PNIT (부산국제신항) ===
+def search_pnit(driver, target_vessel):
+    driver.delete_all_cookies()
+    driver.get("about:blank")
+    time.sleep(0.5)
+    
+    url = "https://www.pnitl.com/infoservice/vessel/vslScheduleList.jsp"
+    results = []
+    
+    try:
+        driver.get(url)
+        time.sleep(2)
+        
+        # 1. 자바스크립트로 오늘 날짜 기준 '30일 뒤'를 계산해서 종료일(strEdDate)에 강제 입력
+        driver.execute_script("""
+            var edDate = document.getElementById('strEdDate');
+            if(edDate) {
+                var d = new Date();
+                d.setDate(d.getDate() + 30); // 현재 날짜에 30일 더하기
+                
+                var yyyy = d.getFullYear();
+                var mm = String(d.getMonth() + 1).padStart(2, '0');
+                var dd = String(d.getDate()).padStart(2, '0');
+                
+                edDate.value = yyyy + '-' + mm + '-' + dd;
+            }
+        """)
+        time.sleep(0.5)
+        
+        # 2. '검색' 버튼 클릭
+        driver.execute_script("""
+            var btns = document.querySelectorAll('button, a, .btn');
+            for(var i=0; i<btns.length; i++){
+                if(btns[i].innerText && btns[i].innerText.includes('검색')) { 
+                    btns[i].click(); 
+                    break; 
+                }
+            }
+        """)
+        
+        target_clean = target_vessel.replace(" ", "").upper()
+
+        # 3. 표 로딩 대기 (PNIT는 .tblType_08 클래스 사용)
+        time.sleep(3) 
+        for _ in range(15): 
+            status = driver.execute_script("""
+                var rows = document.querySelectorAll('.tblType_08 table tbody tr');
+                if (rows.length === 0) return 'wait';
+                var text = rows[0].textContent;
+                if (text.includes('Loading') || text.includes('처리중')) return 'wait';
+                if (text.includes('조회된') || text.includes('없습니다')) return 'empty';
+                return 'ready';
+            """)
+            if status == 'ready': break
+            time.sleep(1)
+
+        # 4. 데이터 긁어오기 (페이지 이동 없이 한 번에 싹쓸이)
+        pnit_data = driver.execute_script("""
+            var results = [];
+            var rows = document.querySelectorAll('.tblType_08 table tbody tr');
+            for(var i=0; i<rows.length; i++) {
+                var cols = rows[i].querySelectorAll('td');
+                // 사진 분석 기준: 모선항차(2), 선사항차(3), 모선명(5), 접안일시(8)
+                if(cols.length > 8) {
+                    results.push({
+                        v_voyage: cols[2].textContent.trim(), 
+                        v_line_voyage: cols[3].textContent.trim(),
+                        v_name: cols[5].textContent.trim(),   
+                        v_date: cols[8].textContent.trim(),   
+                        full_text: rows[i].textContent.toUpperCase()
+                    });
+                }
+            }
+            return results;
+        """)
+        
+        # 5. 파이썬에서 배 이름 매칭
+        if pnit_data:
+            for r in pnit_data:
+                if target_clean in r['full_text'].replace(" ", ""):
+                    if target_clean in r['v_name'].replace(" ", "").upper():
+                        results.append({
+                            "터미널": "PNIT (부산국제신항)",
+                            "구분": "신항",
+                            "모선명": r['v_name'],
+                            "터미널항차": r['v_voyage'],
+                            "접안일시": r['v_date'],
+                            "선사항차": r['v_line_voyage']
+                        })
+
+    except Exception: pass
+        
+    unique = []
+    seen = set()
+    for r in results:
+        key = r['모선명'] + r['접안일시']
+        if key not in seen: 
+            seen.add(key)
+            unique.append(r)
+    return unique
+
 # === UI ===
 st.set_page_config(page_title="신항 통합 조회", page_icon="🚢", layout="wide")
 st.title("🚢 신항 통합 모선 조회")
-st.markdown("**[신항] HJNC (한진) / DGT (동원) 터미널 동시 검색**")
+st.markdown("**[신항] 터미널 동시 검색**")
 
 with st.form("search"):
     c1, c2 = st.columns([3, 1])
@@ -257,12 +358,16 @@ if btn:
             all_res = []
             
            # 1. HJNC 검색 실행 & 결과 합치기
-            status.write("📍 HJNC (신항 한진) 수색 중...")
+            status.write("📍 HJNC (한진신항) 수색 중...")
             all_res.extend(search_hjnc(driver, vessel_input))
             
             # 2. DGT 검색 실행 & 결과 합치기
             status.write("📍 DGT (동원글로벌) 수색 중...")
             all_res.extend(search_dgt(driver, vessel_input))
+
+            # 3. PNIT 검색 실행 & 결과 합치기
+            status.write("📍 PNIT (부산국제) 수색 중...")
+            all_res.extend(search_pnit(driver, vessel_input))
             
             driver.quit()
             status.update(label="조회 완료!", state="complete", expanded=False)
@@ -277,6 +382,8 @@ if btn:
                         color = "orange"
                     elif "DGT" in res['터미널']: 
                         color = "violet" # DGT는 보라색으로 구분
+                    elif "PNIT" in res['터미널']: 
+                        color = "red" # PNIT는 빨간색으로 구분
                     else: 
                         color = "gray"
                     
