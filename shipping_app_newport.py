@@ -234,7 +234,6 @@ def search_dgt(driver, target_vessel):
     return unique
 
 # === 3. PNIT (부산국제신항) ===
-# === 3. PNIT (부산국제신항) 완벽 수정본 ===
 def search_pnit(driver, target_vessel):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -256,41 +255,34 @@ def search_pnit(driver, target_vessel):
             var edDate = document.getElementById('strEdDate');
             if(edDate) {{
                 edDate.value = '{target_date}';
+                // [핵심] 사이트가 날짜 바뀐 것을 알아채도록 강제로 '변경 이벤트' 발생
+                edDate.dispatchEvent(new Event('change'));
             }}
         """)
         time.sleep(0.5)
         
-        # 3. 아주 강력한 '검색' 버튼 클릭
+        # 3. [핵심] 선생님이 찾아주신 이미지 버튼의 고유 ID(submitbtn)를 정확히 타격!
         driver.execute_script("""
-            var clicked = false;
-            var btns = document.querySelectorAll('a, button, input');
-            for(var i=0; i<btns.length; i++){
-                var txt = (btns[i].innerText || btns[i].value || btns[i].alt || "").trim();
-                if(txt.indexOf('검색') !== -1) { 
-                    btns[i].click(); 
-                    clicked = true;
-                    break; 
-                }
-            }
-            // 버튼을 못 찾을 경우 폼(Form) 자체를 강제로 전송해버림
-            if(!clicked && document.submitForm) {
+            var btn = document.getElementById('submitbtn');
+            if(btn) {
+                btn.click();
+            } else if(document.submitForm) {
                 document.submitForm.submit();
             }
         """)
         
-        # [가장 중요한 핵심] 검색 누르면 페이지 새로고침됨!
-        # 여기서 5초를 안 기다려주면 방금 전 1주일 치 옛날 표를 긁어오게 됩니다.
+        # 새로고침 대기 (이거 없으면 이전 1주일치 표를 읽어버림)
         time.sleep(5) 
         
         target_clean = target_vessel.replace(" ", "").upper()
 
-        # 4. 새로고침 완료된 30일 치 데이터 한방에 긁어오기
+        # 4. 30일치 데이터 한방에 긁어오기
         pnit_data = driver.execute_script("""
             var results = [];
             var rows = document.querySelectorAll('.tblType_08 table tbody tr');
             for(var i=0; i<rows.length; i++) {
                 var cols = rows[i].querySelectorAll('td');
-                // 사진 분석 기준: 모선항차(2), 선사항차(3), 모선명(5), 접안일시(8)
+                // 모선항차(2), 선사항차(3), 모선명(5), 접안일시(8)
                 if(cols.length > 8) {
                     results.push({
                         v_voyage: cols[2].textContent.trim(), 
