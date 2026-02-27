@@ -9,7 +9,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# === 브라우저 설정 (클라우드 완벽 호환) ===
+# === 브라우저 설정 ===
 def get_driver():
     options = Options()
     options.add_argument("--headless") 
@@ -101,7 +101,7 @@ def search_hktl(driver, target_vessel):
         if key not in seen: seen.add(key); unique.append(r)
     return unique
 
-# === 2. BPT (북항) ===
+# === 2. BPT (북항) - 대기 로직 강화 ===
 def search_bpt(driver, target_vessel, debug_log):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -127,16 +127,24 @@ def search_bpt(driver, target_vessel, debug_log):
                 target_box.click()
                 time.sleep(0.2)
                 target_box.send_keys(Keys.ENTER)
+                debug_log.append("BPT: 조회 엔터 입력 완료")
         except: pass
 
+        # [핵심] output 프레임으로 이동하고 표가 뜰 때까지 대기
+        time.sleep(2)
         try:
-            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, "//*[contains(text(), '선박명')]")))
-        except:
-            try:
-                img_btns = driver.find_elements(By.XPATH, "//img[contains(@alt, '조회')]")
-                for btn in img_btns: driver.execute_script("arguments[0].click();", btn)
-                time.sleep(5)
-            except: pass
+            driver.switch_to.frame("output")
+            debug_log.append("BPT: output 프레임 진입 성공")
+            
+            # 표가 뜰 때까지 최대 10초 대기
+            for _ in range(10):
+                rows = driver.find_elements(By.TAG_NAME, "tr")
+                if len(rows) > 10:
+                    debug_log.append(f"BPT: 표 확인됨 (총 {len(rows)}줄)")
+                    break
+                time.sleep(1)
+        except Exception as e:
+            debug_log.append(f"BPT 대기 에러: {e}")
 
         rows = driver.find_elements(By.TAG_NAME, "tr")
         target_clean = target_vessel.replace(" ", "").upper()
@@ -163,7 +171,9 @@ def search_bpt(driver, target_vessel, debug_log):
                         })
                     except: continue
     except Exception as e:
-        debug_log.append(f"BPT 에러: {e}")
+        debug_log.append(f"BPT 전체 에러: {e}")
+    finally:
+        driver.switch_to.default_content()
         
     unique = []
     seen = set()
@@ -172,7 +182,7 @@ def search_bpt(driver, target_vessel, debug_log):
         if key not in seen: seen.add(key); unique.append(r)
     return unique
 
-# === 3. HJNC (신항 한진) [NEW!] ===
+# === 3. HJNC (신항 한진) - 무조건 대기 모드 ===
 def search_hjnc(driver, target_vessel, debug_log):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -185,13 +195,12 @@ def search_hjnc(driver, target_vessel, debug_log):
         driver.get(url)
         time.sleep(2)
         
-        # 1. 옵션: '한달' 클릭
+        # 1. '한달' 옵션 클릭
         try:
-            # 텍스트가 '한달'인 라벨 클릭 (가장 안전한 방법)
             labels = driver.find_elements(By.XPATH, "//label[contains(text(), '한달')]")
             if labels:
                 driver.execute_script("arguments[0].click();", labels[0])
-                debug_log.append("HJNC: '한달' 옵션 클릭")
+                debug_log.append("HJNC: '한달' 라디오 버튼 클릭")
         except: pass
         time.sleep(0.5)
         
@@ -201,33 +210,43 @@ def search_hjnc(driver, target_vessel, debug_log):
             for btn in btns:
                 if btn.is_displayed():
                     driver.execute_script("arguments[0].click();", btn)
-                    debug_log.append("HJNC: '조회' 버튼 클릭")
+                    debug_log.append("HJNC: '조회' 버튼 클릭 성공")
                     break
         except: pass
         
-        # 표 로딩 대기
-        time.sleep(4)
-
         target_clean = target_vessel.replace(" ", "").upper()
 
-        # 3. 페이지 순회 (1페이지부터 5페이지까지)
+        # 3. [핵심] 표가 완전히 뜰 때까지 기다리기 (최대 10초)
+        is_table_loaded = False
+        for _ in range(10):
+            rows = driver.find_elements(By.TAG_NAME, "tr")
+            # 화면에 검색조건 창 외에 데이터가 20줄 이상 생기면 로딩 완료로 판단
+            if len(rows) > 20: 
+                is_table_loaded = True
+                debug_log.append(f"HJNC: 1페이지 데이터 로딩 완료! (총 {len(rows)}줄)")
+                break
+            time.sleep(1)
+            
+        if not is_table_loaded:
+            debug_log.append("HJNC: 10초가 지났는데도 표가 안 뜹니다.")
+
+        # 4. 페이지 순회 (1페이지부터 5페이지까지)
         for page in range(1, 6):
             rows = driver.find_elements(By.TAG_NAME, "tr")
-            debug_log.append(f"HJNC {page}페이지: {len(rows)}줄 확인")
             
             for row in rows:
                 if "선박명" in row.text: continue # 헤더 제외
                 
                 row_text_clean = row.text.replace(" ", "").upper()
                 
-                # 해당 줄에 배 이름이 있으면 뜯어봄
+                # 배 이름이 포함된 줄을 찾으면 칸(td)을 분석
                 if target_clean in row_text_clean:
                     cols = row.find_elements(By.TAG_NAME, "td")
                     
-                    # 칸이 충분히 있고 날짜가 있는 줄
                     if len(cols) > 10 and "202" in row.text:
                         try:
-                            # 사진 분석: 4번칸(선박명), 3번칸(모선항차), 10번칸(입항일시), 5번칸(선사항차)
+                            # 사진 분석에 따른 정확한 칸 번호
+                            # 4:선박명 / 3:모선항차 / 10:입항일시 / 5:선사항차
                             v_name = cols[4].text.strip()
                             v_voyage = cols[3].text.strip()
                             v_date = cols[10].text.strip()
@@ -248,19 +267,20 @@ def search_hjnc(driver, target_vessel, debug_log):
             if page < 5:
                 try:
                     next_page = str(page + 1)
-                    # 텍스트가 '2', '3'인 링크(a 태그) 찾기
                     page_links = driver.find_elements(By.XPATH, f"//a[text()='{next_page}']")
                     if page_links and page_links[0].is_displayed():
                         driver.execute_script("arguments[0].click();", page_links[0])
-                        time.sleep(3) # 다음 페이지 로딩 대기
+                        debug_log.append(f"HJNC: {next_page}페이지로 이동 중...")
+                        
+                        # [핵심] 다음 페이지를 눌렀으니 또 표가 바뀔 때까지 기다림
+                        time.sleep(3) 
                     else:
-                        break # 다음 페이지 버튼 없으면 종료
+                        break # 더 이상 넘길 페이지가 없으면 종료
                 except: break
 
     except Exception as e:
-        debug_log.append(f"HJNC 에러: {e}")
+        debug_log.append(f"HJNC 전체 에러: {e}")
         
-    # 중복 제거
     unique = []
     seen = set()
     for r in results:
@@ -304,18 +324,16 @@ if btn:
             driver.quit()
             status.update(label="조회 완료!", state="complete", expanded=False)
             
-            # (옵션) 에러 확인용 로그
-            with st.expander("🛠️ 시스템 작동 로그 (문제 발생 시 확인)"):
+            # 시스템 로그를 볼 수 있도록 유지 (디버깅용)
+            with st.expander("🛠️ 시스템 작동 로그 (결과가 이상할 때 열어보세요)"):
                 for log in debug_logs:
                     st.text(f"- {log}")
             
             if all_res:
-                # 전체 시간순 정렬
                 all_res.sort(key=lambda x: x['접안일시'])
                 st.success(f"✅ 총 {len(all_res)}건의 일정을 찾았습니다.")
                 
                 for i, res in enumerate(all_res):
-                    # 터미널별로 색깔 다르게 주기
                     if "HJNC" in res['터미널']: color = "orange"
                     elif "BPT" in res['터미널']: color = "blue"
                     else: color = "green"
