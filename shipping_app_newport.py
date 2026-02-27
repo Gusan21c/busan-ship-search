@@ -384,6 +384,6 @@ if btn:
                         
                     st.divider()
             else:
-                st.error(f"'{vessel_input}'에 대한 결과가 신항(HJNC, DGT)에 없습니다.")
+                st.error(f"'{vessel_input}'에 대한 결과가 신항(HJNC, DGT, PNIT)에 없습니다.")
         except Exception as e:
             st.error(f"오류가 발생했습니다: {e}")
