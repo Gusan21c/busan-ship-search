@@ -44,7 +44,7 @@ def get_driver():
         
     return driver
 
-# === 1. 허치슨 (북항) ===
+# === 1. 허치슨 (북항) - 이상 없음 ===
 def search_hktl(driver, target_vessel):
     url = "https://custom.hktl.com/jsp/T01/sunsuk.jsp"
     results = []
@@ -99,7 +99,7 @@ def search_hktl(driver, target_vessel):
         if key not in seen: seen.add(key); unique.append(r)
     return unique
 
-# === 2. BPT (북항) ===
+# === 2. BPT (북항) - 원상 복구 & 자바스크립트 무적 추출 ===
 def search_bpt(driver, target_vessel, debug_log):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -111,6 +111,7 @@ def search_bpt(driver, target_vessel, debug_log):
         driver.get(url)
         time.sleep(2)
         
+        # 옵션 세팅
         try:
             driver.execute_script("document.querySelectorAll('input[type=radio]')[2].click();") 
             sort_labels = driver.find_elements(By.XPATH, "//*[contains(text(), '입항예정일시')]")
@@ -118,6 +119,7 @@ def search_bpt(driver, target_vessel, debug_log):
         except: pass
         time.sleep(0.5)
 
+        # 조회 버튼 강제 클릭
         try:
             driver.execute_script("""
                 var btns = document.querySelectorAll('img, a, button');
@@ -126,42 +128,61 @@ def search_bpt(driver, target_vessel, debug_log):
                     if(btns[i].innerText && btns[i].innerText.includes('조회')) { btns[i].click(); return; }
                 }
             """)
+            debug_log.append("BPT: 조회 버튼 클릭 완료")
         except: pass
         time.sleep(2)
 
+        # 프레임 진입 및 표 로딩 확인
         try:
             driver.switch_to.frame("output")
             for _ in range(10):
-                rows = driver.find_elements(By.TAG_NAME, "tr")
-                if len(rows) > 10: break
+                row_count = driver.execute_script("return document.querySelectorAll('tr').length;")
+                if row_count > 10:
+                    debug_log.append(f"BPT: 표 완벽 로딩! (총 {row_count}줄)")
+                    break
                 time.sleep(1)
-        except: pass
+        except Exception as e:
+            debug_log.append(f"BPT 프레임 에러: {e}")
 
-        rows = driver.find_elements(By.TAG_NAME, "tr")
-        target_clean = target_vessel.replace(" ", "").upper()
-        
-        for row in rows:
-            if "선박명" in row.text: continue
-            row_text_clean = row.text.replace(" ", "").upper()
+        # [핵심] 브라우저 내부에서 데이터 싹쓸이 (에러 방지)
+        try:
+            bpt_data = driver.execute_script("""
+                var results = [];
+                var rows = document.querySelectorAll('tr');
+                for(var i=0; i<rows.length; i++) {
+                    var cols = rows[i].querySelectorAll('td');
+                    if(cols.length > 6) {
+                        results.push({
+                            term_div: cols[0].textContent.trim(),
+                            v_voyage: cols[2].textContent.trim(),
+                            v_name: cols[3].textContent.trim(),
+                            v_date: cols[6].textContent.trim(),
+                            full_text: rows[i].textContent.toUpperCase()
+                        });
+                    }
+                }
+                return results;
+            """)
             
-            if target_clean in row_text_clean:
-                cols = row.find_elements(By.TAG_NAME, "td")
-                if len(cols) > 6:
-                    try:
-                        v_name = cols[3].text.strip()
-                        v_date = cols[6].text.strip()
-                        v_voyage = cols[2].text.strip()
-                        if not v_date.startswith("20"): continue
-                        results.append({
-                            "터미널": "BPT (부산항터미널)",
-                            "구분": cols[0].text.strip(),
-                            "모선명": v_name,
-                            "터미널항차": v_voyage,
-                            "접안일시": v_date,
-                            "선사항차": "-" 
-                        })
-                    except: continue
-    except: pass
+            target_clean = target_vessel.replace(" ", "").upper()
+            for r in bpt_data:
+                if "선박명" in r['full_text']: continue
+                if target_clean in r['full_text'].replace(" ", ""):
+                    if target_clean in r['v_name'].replace(" ", "").upper():
+                        if r['v_date'].startswith("20"):
+                            results.append({
+                                "터미널": "BPT (부산항터미널)",
+                                "구분": r['term_div'],
+                                "모선명": r['v_name'],
+                                "터미널항차": r['v_voyage'],
+                                "접안일시": r['v_date'],
+                                "선사항차": "-" 
+                            })
+        except Exception as e:
+            debug_log.append(f"BPT 데이터 파싱 에러: {e}")
+
+    except Exception as e:
+        debug_log.append(f"BPT 전체 에러: {e}")
     finally:
         driver.switch_to.default_content()
         
@@ -172,7 +193,7 @@ def search_bpt(driver, target_vessel, debug_log):
         if key not in seen: seen.add(key); unique.append(r)
     return unique
 
-# === 3. HJNC (신항 한진) - Stale Element 에러 완벽 차단! ===
+# === 3. HJNC (신항 한진) - 자바스크립트 무적 추출 ===
 def search_hjnc(driver, target_vessel, debug_log):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -185,6 +206,7 @@ def search_hjnc(driver, target_vessel, debug_log):
         driver.get(url)
         time.sleep(2)
         
+        # '한달' 및 '조회' 클릭
         driver.execute_script("""
             var radios = document.querySelectorAll('input[type="radio"]');
             if(radios.length > 2) { radios[2].click(); }
@@ -201,72 +223,83 @@ def search_hjnc(driver, target_vessel, debug_log):
         
         target_clean = target_vessel.replace(" ", "").upper()
 
-        # 표 로딩 대기
+        # 표 로딩 넉넉히 대기
         is_table_loaded = False
         for _ in range(20): 
-            rows = driver.find_elements(By.CSS_SELECTOR, "div.dataTables_scrollBody table#tblMaster tbody tr")
-            if len(rows) > 0:
-                try:
-                    first_row = rows[0].get_attribute("textContent")
-                    if first_row and "조회된" not in first_row and "Loading" not in first_row and "처리중" not in first_row:
-                        is_table_loaded = True
-                        debug_log.append(f"HJNC: 표 완벽 로딩! (총 {len(rows)}줄)")
-                        break
-                except: pass
+            row_count = driver.execute_script("return document.querySelectorAll('#tblMaster tbody tr').length;")
+            if row_count > 0:
+                first_row = driver.execute_script("return document.querySelector('#tblMaster tbody tr').textContent;")
+                if first_row and "조회된" not in first_row and "Loading" not in first_row and "처리중" not in first_row:
+                    is_table_loaded = True
+                    debug_log.append(f"HJNC: 표 완벽 로딩! (총 {row_count}줄)")
+                    break
             time.sleep(1)
 
-        # 3. 데이터 긁어오기 (5페이지)
+        # 5페이지 순회
         for page in range(1, 6):
-            time.sleep(1) # 페이지 넘어가고 혹시 모를 로딩 대비 약간 쉼
+            time.sleep(1)
             
-            # [핵심] 몇 줄인지 숫자만 셈
-            current_rows = driver.find_elements(By.CSS_SELECTOR, "div.dataTables_scrollBody table#tblMaster tbody tr")
-            row_count = len(current_rows)
+            # [핵심] 로봇이 헤매지 않게 브라우저 내부에서 JS로 데이터를 몽땅 훔쳐옵니다 (Stale 에러 원천 차단)
+            try:
+                hjnc_data = driver.execute_script("""
+                    var results = [];
+                    var rows = document.querySelectorAll('#tblMaster tbody tr');
+                    for(var i=0; i<rows.length; i++) {
+                        var cols = rows[i].querySelectorAll('td');
+                        if(cols.length > 10) {
+                            results.push({
+                                v_voyage: cols[3].textContent.trim(),
+                                v_name: cols[4].textContent.trim(),
+                                v_line_voyage: cols[5].textContent.trim(),
+                                v_date: cols[10].textContent.trim(),
+                                full_text: rows[i].textContent.toUpperCase()
+                            });
+                        }
+                    }
+                    return results;
+                """)
+                
+                # 가져온 데이터 파이썬에서 정리
+                for r in hjnc_data:
+                    if target_clean in r['full_text'].replace(" ", ""):
+                        if target_clean in r['v_name'].replace(" ", "").upper():
+                            results.append({
+                                "터미널": "HJNC (신항 한진)",
+                                "구분": "신항",
+                                "모선명": r['v_name'],
+                                "터미널항차": r['v_voyage'],
+                                "접안일시": r['v_date'],
+                                "선사항차": r['v_line_voyage']
+                            })
+            except Exception as e:
+                debug_log.append(f"HJNC {page}페이지 추출 에러: {e}")
             
-            # [핵심] 1번 줄, 2번 줄... 순서대로 매번 새롭게 화면에서 찾아옴 (Stale 방지)
-            for i in range(row_count):
-                try:
-                    # i번째 줄을 매번 새로 멱살 잡기!
-                    row = driver.find_elements(By.CSS_SELECTOR, "div.dataTables_scrollBody table#tblMaster tbody tr")[i]
-                    
-                    row_text_raw = row.get_attribute("textContent")
-                    if not row_text_raw: continue
-                    
-                    row_text_clean = row_text_raw.replace(" ", "").upper()
-                    
-                    if target_clean in row_text_clean:
-                        cols = row.find_elements(By.TAG_NAME, "td")
-                        
-                        if len(cols) > 10:
-                            v_name = cols[4].get_attribute("textContent").strip()
-                            v_voyage = cols[3].get_attribute("textContent").strip()
-                            v_date = cols[10].get_attribute("textContent").strip()
-                            v_line_voyage = cols[5].get_attribute("textContent").strip()
-                            
-                            if target_clean in v_name.replace(" ", "").upper():
-                                results.append({
-                                    "터미널": "HJNC (신항 한진)",
-                                    "구분": "신항",
-                                    "모선명": v_name,
-                                    "터미널항차": v_voyage,
-                                    "접안일시": v_date,
-                                    "선사항차": v_line_voyage
-                                })
-                except Exception as e:
-                    # 중간에 에러가 나더라도 죽지 않고 다음 줄(i+1)로 조용히 넘어가기!
-                    continue
-            
-            # 다음 페이지 이동
+            # 다음 페이지 클릭
             if page < 5:
-                try:
-                    next_page = str(page + 1)
-                    page_links = driver.find_elements(By.XPATH, f"//a[text()='{next_page}']")
-                    if page_links:
-                        driver.execute_script("arguments[0].click();", page_links[0])
-                        time.sleep(3) # [수정] 페이지 넘어가고 조금 더 넉넉히 대기
-                    else:
-                        break 
-                except: break
+                next_page = str(page + 1)
+                click_success = driver.execute_script(f"""
+                    var links = document.querySelectorAll('.paginate_button');
+                    for(var i=0; i<links.length; i++) {{
+                        if(links[i].textContent.trim() === '{next_page}') {{
+                            links[i].click();
+                            return true;
+                        }}
+                    }}
+                    var a_tags = document.querySelectorAll('a');
+                    for(var i=0; i<a_tags.length; i++) {{
+                        if(a_tags[i].textContent.trim() === '{next_page}') {{
+                            a_tags[i].click();
+                            return true;
+                        }}
+                    }}
+                    return false;
+                """)
+                
+                if click_success:
+                    debug_log.append(f"HJNC: {next_page}페이지로 이동")
+                    time.sleep(3) 
+                else:
+                    break 
 
     except Exception as e:
         debug_log.append(f"HJNC 시스템 에러 발생: {e}")
