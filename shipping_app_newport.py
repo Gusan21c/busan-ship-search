@@ -7,7 +7,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 
-# === 브라우저 설정 ===
+# === 브라우저 설정 (자동 감지 모드) ===
 def get_driver():
     options = Options()
     options.add_argument("--headless") 
@@ -29,7 +29,7 @@ def get_driver():
         
     return driver
 
-# === HJNC (신항 한진) ===
+# === 1. HJNC (신항 한진) ===
 def search_hjnc(driver, target_vessel):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -42,12 +42,12 @@ def search_hjnc(driver, target_vessel):
         driver.get(url)
         time.sleep(2)
         
-        # [핵심 수정] 선생님이 찾아주신 진짜 '한달' 버튼(value="m1")을 직접 클릭!
+        # '한달' 스위치(m1) 켜기
         driver.execute_script("""
             var monthBtn = document.querySelector('input[name="chkPeriod"][value="m1"]');
             if(monthBtn) { monthBtn.click(); }
         """)
-        time.sleep(0.5) # 누르고 살짝 대기
+        time.sleep(0.5)
         
         # '조회' 버튼 클릭
         driver.execute_script("""
@@ -78,7 +78,7 @@ def search_hjnc(driver, target_vessel):
 
         # 5페이지 순회하며 데이터 긁어오기
         for page in range(1, 6):
-            time.sleep(1)
+            time.sleep(1.5) # 페이지 로딩을 위해 살짝 대기
             
             hjnc_data = driver.execute_script("""
                 var results = [];
@@ -111,20 +111,22 @@ def search_hjnc(driver, target_vessel):
                                 "선사항차": r['v_line_voyage']
                             })
             
-            # 다음 페이지 이동
+            # [핵심 수정] 선생님이 찾아주신 'page-link' 클래스로 다음 페이지 클릭!
             if page < 5:
                 next_page = str(page + 1)
                 clicked = driver.execute_script(f"""
-                    var links = document.querySelectorAll('.paginate_button');
+                    var links = document.querySelectorAll('a.page-link');
                     for(var i=0; i<links.length; i++) {{
                         if(links[i].textContent.trim() === '{next_page}') {{
-                            links[i].click(); return true;
+                            links[i].click(); 
+                            return true;
                         }}
                     }}
                     return false;
                 """)
-                if not clicked: break
-                time.sleep(2)
+                if not clicked: 
+                    break # 다음 페이지(예: 3페이지)가 없으면 더 이상 찾지 않고 종료
+                time.sleep(2) # 버튼 누르고 다음 페이지 표가 뜰 때까지 2초 대기
 
     except Exception: pass
         
