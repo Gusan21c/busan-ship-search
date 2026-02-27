@@ -186,7 +186,7 @@ def search_dgt(driver, target_vessel):
         for page in range(1, 6):
             time.sleep(1.5)
             
-            # [핵심 수정] DGT 표 형식에 맞게 칸(td) 번호 변경
+            # [핵심 수정] DGT 표 형식에 맞게 칸(td) 번호 변경 (3번: 모선명, 2번: 항차, 5번: 접안일시)
             dgt_data = driver.execute_script("""
                 var results = [];
                 var rows = document.querySelectorAll('.dataTables_scrollBody table tbody tr');
@@ -248,7 +248,7 @@ def search_dgt(driver, target_vessel):
 # === UI ===
 st.set_page_config(page_title="신항 통합 조회", page_icon="🚢", layout="wide")
 st.title("🚢 신항 통합 모선 조회")
-st.markdown("**[신항] HJNC(한진) 터미널 전용 조회**")
+st.markdown("**[신항] HJNC (한진) / DGT (동원) 터미널 동시 검색**")
 
 with st.form("search"):
     c1, c2 = st.columns([3, 1])
@@ -257,7 +257,7 @@ with st.form("search"):
     with c2:
         st.write("")
         st.write("")
-        btn = st.form_submit_button("🔍 조회 시작", type="primary")
+        btn = st.form_submit_button("🔍 통합 조회 시작", type="primary")
 
 if btn:
     if not vessel_input:
@@ -268,21 +268,34 @@ if btn:
             driver = get_driver()
             all_res = []
             
-            status.write("📍 HJNC(신항 한진) 스캔 중...")
+           # 1. HJNC 검색 실행 & 결과 합치기
+            status.write("📍 HJNC (신항 한진) 수색 중...")
             all_res.extend(search_hjnc(driver, vessel_input))
+            
+            # 2. DGT 검색 실행 & 결과 합치기
+            status.write("📍 DGT (동원글로벌) 수색 중...")
+            all_res.extend(search_dgt(driver, vessel_input))
             
             driver.quit()
             status.update(label="조회 완료!", state="complete", expanded=False)
             
             if all_res:
+                # 날짜순으로 정렬
                 all_res.sort(key=lambda x: x['접안일시'])
                 st.success(f"✅ 총 {len(all_res)}건 발견")
                 for i, res in enumerate(all_res):
-                    color = "orange"
+                    # 터미널별로 색깔 다르게 주기
+                    if "HJNC" in res['터미널']: 
+                        color = "orange"
+                    elif "DGT" in res['터미널']: 
+                        color = "violet" # DGT는 보라색으로 구분
+                    else: 
+                        color = "gray"
+                    
                     st.markdown(f"### {i+1}. :{color}[{res['터미널']} - {res['구분']}]")
                     c1, c2, c3 = st.columns(3)
                     c1.metric("모선명", res['모선명'])
-                    c2.metric("입항일시 (ETA)", res['접안일시'])
+                    c2.metric("입항예정일시(ETA)", res['접안일시'])
                     c3.metric("터미널 모선항차", res['터미널항차'])
                     
                     if res.get('선사항차') and res.get('선사항차') != "-":
@@ -290,6 +303,6 @@ if btn:
                         
                     st.divider()
             else:
-                st.error(f"'{vessel_input}'에 대한 결과가 신항(HJNC)에 없습니다.")
+                st.error(f"'{vessel_input}'에 대한 결과가 신항(HJNC, DGT)에 없습니다.")
         except Exception as e:
             st.error(f"오류가 발생했습니다: {e}")
