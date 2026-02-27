@@ -329,6 +329,7 @@ def search_pnit(driver, target_vessel):
             unique.append(r)
     return unique
 
+
 # === UI ===
 st.set_page_config(page_title="신항 통합 조회", page_icon="🚢", layout="wide")
 st.title("🚢 신항 통합 모선 조회")
