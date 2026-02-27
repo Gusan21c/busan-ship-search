@@ -248,62 +248,57 @@ def search_pnit(driver, target_vessel):
     
     try:
         driver.get(url)
+        # 1. 사이트 진입 후 넉넉히 4초 대기 (이때 파이썬 에러가 날 일은 절대 없습니다)
+        time.sleep(4) 
         
-        # 1. 완벽한 로딩 대기 (프레임 뻘짓 삭제! 눈앞에 날짜 칸이 뜰 때까지 대기)
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.ID, "strEdDate"))
-        )
-        time.sleep(1) 
-        
-        # 📸 [찰칵 1] 
-        st.image(driver.get_screenshot_as_png(), caption="📸 1. 접속 직후 (에러 없이 화면이 잘 떴는지 확인!)")
+        # 📸 [찰칵 1] 무조건 1번 사진부터 찍고 시작합니다.
+        st.image(driver.get_screenshot_as_png(), caption="📸 1. 접속 직후 (흰 화면인지, 정상 표인지 확인해주세요!)")
         
         # 30일 뒤 날짜
         from datetime import datetime, timedelta
         target_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
         
-        # 2. [초강력 무적 입력] 모바일용/PC용 숨겨진 칸 가리지 않고 모조리 30일 뒤로 세팅
+        # 2. [자바스크립트 풀파워] 날짜 세팅 및 검색 클릭
         driver.execute_script(f"""
-            var dates = document.getElementsByName('strEdDate');
-            for(var i=0; i<dates.length; i++) {{
-                dates[i].value = '{target_date}';
-                dates[i].setAttribute('value', '{target_date}');
-                // 사이트가 눈치채도록 모든 신호(Event) 발생
-                dates[i].dispatchEvent(new Event('input', {{ bubbles: true }}));
-                dates[i].dispatchEvent(new Event('change', {{ bubbles: true }}));
+            // 날짜 칸을 ID나 Name으로 확실하게 찾기
+            var edDate = document.getElementById('strEdDate') || document.querySelector('input[name="strEdDate"]');
+            
+            if (edDate) {{
+                // 강제로 날짜 값을 꽂아 넣음
+                edDate.value = '{target_date}';
+                edDate.setAttribute('value', '{target_date}');
                 
-                // 제이쿼리(jQuery)를 쓰는 사이트라면 강제로 멱살 잡기
+                // 사람이 조작한 것처럼 온갖 이벤트를 다 발생시킴
+                edDate.dispatchEvent(new Event('focus', {{ bubbles: true }}));
+                edDate.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                edDate.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                edDate.dispatchEvent(new Event('blur', {{ bubbles: true }}));
+                
                 if(typeof window.jQuery !== 'undefined') {{
-                    window.jQuery(dates[i]).trigger('change');
+                    window.jQuery(edDate).trigger('change');
                 }}
             }}
+            
+            // 0.5초 뒤에 돋보기 버튼 클릭
+            setTimeout(function() {{
+                var btn = document.getElementById('submitbtn') || document.querySelector('img[src*="btn_search"]');
+                if (btn) {{
+                    btn.click();
+                }} else if (document.submitForm) {{
+                    document.submitForm.submit();
+                }}
+            }}, 500);
         """)
-        time.sleep(1)
+        
+        # 3. 검색 버튼 누르고 서버에서 데이터가 올 때까지 6초 대기
+        time.sleep(6) 
         
         # 📸 [찰칵 2] 
-        st.image(driver.get_screenshot_as_png(), caption=f"📸 2. 날짜 강제 주입 후 (종료일이 '{target_date}'로 바뀌었나요?)")
-        
-        # 3. 돋보기 버튼 타격 (제이쿼리 방식 + 일반 방식 모두 동원)
-        driver.execute_script("""
-            var btn = document.getElementById('submitbtn');
-            if(typeof window.jQuery !== 'undefined' && btn) {
-                window.jQuery(btn).trigger('click');
-            } else if(btn) {
-                btn.click();
-            } else if(document.submitForm) {
-                document.submitForm.submit();
-            }
-        """)
-        
-        # 4. 서버 응답 및 표 재생성 대기
-        time.sleep(5) 
-        
-        # 📸 [찰칵 3] 
-        st.image(driver.get_screenshot_as_png(), caption="📸 3. 돋보기 클릭 5초 후 (표 내용이 늘어났나요?)")
+        st.image(driver.get_screenshot_as_png(), caption=f"📸 2. 검색 수행 후 (종료일이 '{target_date}'로 바뀌고 표가 길어졌나요?)")
         
         target_clean = target_vessel.replace(" ", "").upper()
 
-        # 5. 데이터 싹쓸이
+        # 4. 데이터 싹쓸이
         pnit_data = driver.execute_script("""
             var results = [];
             var rows = document.querySelectorAll('.tblType_08 table tbody tr');
