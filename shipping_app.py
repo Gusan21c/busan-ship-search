@@ -182,7 +182,7 @@ def search_bpt(driver, target_vessel, debug_log):
         if key not in seen: seen.add(key); unique.append(r)
     return unique
 
-# === 3. HJNC (신항 한진) - 무조건 대기 모드 ===
+# === 3. HJNC (신항 한진) - tblMaster 정밀 타격 모드 ===
 def search_hjnc(driver, target_vessel, debug_log):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -216,27 +216,28 @@ def search_hjnc(driver, target_vessel, debug_log):
         
         target_clean = target_vessel.replace(" ", "").upper()
 
-        # 3. [핵심] 표가 완전히 뜰 때까지 기다리기 (최대 10초)
+        # 3. [핵심] tblMaster 표가 완전히 뜰 때까지 기다리기 (최대 15초)
         is_table_loaded = False
-        for _ in range(10):
-            rows = driver.find_elements(By.TAG_NAME, "tr")
-            # 화면에 검색조건 창 외에 데이터가 20줄 이상 생기면 로딩 완료로 판단
-            if len(rows) > 20: 
+        for _ in range(15):
+            # 화면 전체가 아니라, 아이디가 tblMaster인 표의 본문(tbody) 줄(tr)만 정확히 찾습니다.
+            rows = driver.find_elements(By.CSS_SELECTOR, "#tblMaster tbody tr")
+            
+            # 줄이 1개라도 있고, 로딩 중이거나 데이터가 없다는 메시지가 아니면 성공
+            if len(rows) > 0 and "조회된 데이터가 없습니다" not in rows[0].text and "Loading" not in rows[0].text: 
                 is_table_loaded = True
-                debug_log.append(f"HJNC: 1페이지 데이터 로딩 완료! (총 {len(rows)}줄)")
+                debug_log.append(f"HJNC: 1페이지 데이터 로딩 완료! (총 {len(rows)}줄 확인)")
                 break
             time.sleep(1)
             
         if not is_table_loaded:
-            debug_log.append("HJNC: 10초가 지났는데도 표가 안 뜹니다.")
+            debug_log.append("HJNC: 15초를 기다렸지만 tblMaster 표가 뜨지 않았습니다.")
 
         # 4. 페이지 순회 (1페이지부터 5페이지까지)
         for page in range(1, 6):
-            rows = driver.find_elements(By.TAG_NAME, "tr")
+            # 여기서도 정확히 tblMaster 안의 줄만 가져옵니다.
+            rows = driver.find_elements(By.CSS_SELECTOR, "#tblMaster tbody tr")
             
             for row in rows:
-                if "선박명" in row.text: continue # 헤더 제외
-                
                 row_text_clean = row.text.replace(" ", "").upper()
                 
                 # 배 이름이 포함된 줄을 찾으면 칸(td)을 분석
@@ -245,7 +246,6 @@ def search_hjnc(driver, target_vessel, debug_log):
                     
                     if len(cols) > 10 and "202" in row.text:
                         try:
-                            # 사진 분석에 따른 정확한 칸 번호
                             # 4:선박명 / 3:모선항차 / 10:입항일시 / 5:선사항차
                             v_name = cols[4].text.strip()
                             v_voyage = cols[3].text.strip()
@@ -272,10 +272,10 @@ def search_hjnc(driver, target_vessel, debug_log):
                         driver.execute_script("arguments[0].click();", page_links[0])
                         debug_log.append(f"HJNC: {next_page}페이지로 이동 중...")
                         
-                        # [핵심] 다음 페이지를 눌렀으니 또 표가 바뀔 때까지 기다림
+                        # 페이지 넘긴 후 표가 갱신될 때까지 대기
                         time.sleep(3) 
                     else:
-                        break # 더 이상 넘길 페이지가 없으면 종료
+                        break 
                 except: break
 
     except Exception as e:
@@ -287,7 +287,7 @@ def search_hjnc(driver, target_vessel, debug_log):
         key = r['모선명'] + r['접안일시']
         if key not in seen: seen.add(key); unique.append(r)
     return unique
-
+    
 # === UI ===
 st.set_page_config(page_title="부산항 통합 조회", page_icon="🚢", layout="wide")
 st.title("🚢 부산항(북항+신항) 통합 조회기")
@@ -350,3 +350,4 @@ if btn:
                 st.error(f"'{vessel_input}' 스케줄을 3곳 모두에서 찾지 못했습니다.")
         except Exception as e:
             st.error(f"오류가 발생했습니다: {e}")
+
