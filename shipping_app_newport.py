@@ -233,7 +233,7 @@ def search_dgt(driver, target_vessel):
             unique.append(r)
     return unique
 
-# === 3. PNIT (부산국제신항) ===
+# === 3. PNIT (부산국제신항) - 카메라 장착 & 프레임 진입 버전 ===
 def search_pnit(driver, target_vessel):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -244,15 +244,17 @@ def search_pnit(driver, target_vessel):
     
     try:
         driver.get(url)
-        time.sleep(2)
+        time.sleep(3) # 사이트 로딩 대기
         
-        # [가장 중요한 핵심] 프레임(액자) 안으로 쏙 들어가기!
+        # 📸 [찰칵 1] 사이트 접속 직후 로봇이 보는 화면
+        st.image(driver.get_screenshot_as_png(), caption="📸 1. PNIT 접속 직후 (아직 1주일치 표)")
+        
+        # [핵심] 프레임(액자) 안으로 쏙 들어가기!
         frames = driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
         for frame in frames:
             try:
                 driver.switch_to.default_content() 
                 driver.switch_to.frame(frame)      
-                # 프레임 안에 들어와서 날짜 칸(strEdDate)이 있는지 확인
                 if driver.find_elements(By.ID, "strEdDate"):
                     break 
             except: continue
@@ -263,25 +265,34 @@ def search_pnit(driver, target_vessel):
         from datetime import datetime, timedelta
         target_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
         
-        # 날짜 세팅 및 돋보기(submitbtn) 검색 버튼 일괄 타격!
-        # 이제 프레임 안이라서 완벽하게 찾아서 누릅니다.
+        # 날짜 강제 주입
         driver.execute_script(f"""
             var edDate = document.getElementById('strEdDate');
             if(edDate) {{
                 edDate.value = '{target_date}';
                 edDate.dispatchEvent(new Event('change', {{ bubbles: true }}));
             }}
-            
+        """)
+        time.sleep(1) # 날짜가 화면에 반영될 때까지 1초 넉넉히 대기
+        
+        # 📸 [찰칵 2] 날짜 변경 직후 화면 (액자 안에서 바꾼 날짜가 잘 찍혔는지 확인!)
+        st.image(driver.get_screenshot_as_png(), caption=f"📸 2. 날짜 변경 직후 (종료일이 '{target_date}'로 바뀌었나요?)")
+        
+        # 돋보기(submitbtn) 검색 버튼 타격!
+        driver.execute_script("""
             var btn = document.getElementById('submitbtn');
-            if(btn) {{
+            if(btn) {
                 btn.click();
-            }} else if(document.submitForm) {{
+            } else if(document.submitForm) {
                 document.submitForm.submit();
-            }}
+            }
         """)
         
-        # 새로고침 대기 (30일치 표가 로딩될 때까지 5초 기다림)
+        # 새로고침 대기 (30일치 표가 서버에서 날아올 때까지 5초 기다림)
         time.sleep(5) 
+        
+        # 📸 [찰칵 3] 검색 버튼 누르고 5초 후 화면 (표가 길어졌는지 확인!)
+        st.image(driver.get_screenshot_as_png(), caption="📸 3. 검색 완료 후 (30일치 표로 늘어났나요?)")
         
         target_clean = target_vessel.replace(" ", "").upper()
 
@@ -317,9 +328,10 @@ def search_pnit(driver, target_vessel):
                             "선사항차": r['v_line_voyage']
                         })
 
-    except Exception: pass
+    except Exception as e: 
+        st.error(f"PNIT 작동 중 에러가 발생했습니다: {e}")
     finally:
-        # 볼일 다 봤으면 원래 바깥 화면으로 복귀
+        # 볼일 다 봤으면 원래 바깥 화면으로 복귀!
         driver.switch_to.default_content()
         
     unique = []
