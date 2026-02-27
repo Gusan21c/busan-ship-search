@@ -9,31 +9,44 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# === 브라우저 설정 (자동 감지 모드) ===
+# === 브라우저 설정 (클라우드 완벽 호환) ===
 def get_driver():
     options = Options()
-    options.add_argument("--headless") # 화면 없이 실행 (필수)
+    options.add_argument("--headless") 
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
     
-    # [중요] 클라우드 환경인지 확인하는 로직
-    # Streamlit Cloud에는 '/usr/bin/chromium'에 브라우저가 설치됩니다.
-    if os.path.exists("/usr/bin/chromium"):
-        options.binary_location = "/usr/bin/chromium"
-        # 패키지로 설치된 드라이버를 직접 지정
-        service = Service("/usr/bin/chromedriver")
+    chromium_path = None
+    chromedriver_path = None
+    possible_bins = ["/usr/bin/chromium", "/usr/bin/chromium-browser"]
+    possible_drivers = ["/usr/bin/chromedriver", "/usr/lib/chromium-browser/chromedriver"]
+    
+    for p in possible_bins:
+        if os.path.exists(p): chromium_path = p; break
+    for d in possible_drivers:
+        if os.path.exists(d): chromedriver_path = d; break
+            
+    if chromium_path and chromedriver_path:
+        options.binary_location = chromium_path
+        service = Service(chromedriver_path)
         driver = webdriver.Chrome(service=service, options=options)
     else:
-        # 내 컴퓨터(Windows)에서는 다운로드 방식 사용
-        from webdriver_manager.chrome import ChromeDriverManager
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=options)
+        try:
+            from webdriver_manager.chrome import ChromeDriverManager
+            from webdriver_manager.core.os_manager import ChromeType
+            service = Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
+            driver = webdriver.Chrome(service=service, options=options)
+        except:
+            from webdriver_manager.chrome import ChromeDriverManager
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=options)
         
     return driver
 
-# === 1. 허치슨 ===
+# === 1. 허치슨 (북항) ===
 def search_hktl(driver, target_vessel):
     url = "https://custom.hktl.com/jsp/T01/sunsuk.jsp"
     results = []
@@ -85,20 +98,17 @@ def search_hktl(driver, target_vessel):
     seen = set()
     for r in results:
         key = r['모선명'] + r['접안일시']
-        if key not in seen:
-            seen.add(key)
-            unique.append(r)
+        if key not in seen: seen.add(key); unique.append(r)
     return unique
 
-# === 2. BPT ===
-def search_bpt(driver, target_vessel):
+# === 2. BPT (북항) ===
+def search_bpt(driver, target_vessel, debug_log):
     driver.delete_all_cookies()
     driver.get("about:blank")
     time.sleep(0.5)
     
     url = "https://info.bptc.co.kr/content/sw/frame/berth_status_text_frame_sw_kr.jsp?p_id=BETX_SH_KR&snb_num=2&snb_div=service"
     results = []
-    
     try:
         driver.get(url)
         time.sleep(2)
@@ -115,101 +125,210 @@ def search_bpt(driver, target_vessel):
             if inputs:
                 target_box = inputs[-1]
                 target_box.click()
+                time.sleep(0.2)
                 target_box.send_keys(Keys.ENTER)
         except: pass
-        
-        time.sleep(3)
+
         try:
-            driver.switch_to.frame("output")
-        except: pass
+            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, "//*[contains(text(), '선박명')]")))
+        except:
+            try:
+                img_btns = driver.find_elements(By.XPATH, "//img[contains(@alt, '조회')]")
+                for btn in img_btns: driver.execute_script("arguments[0].click();", btn)
+                time.sleep(5)
+            except: pass
 
         rows = driver.find_elements(By.TAG_NAME, "tr")
         target_clean = target_vessel.replace(" ", "").upper()
         
         for row in rows:
+            if "선박명" in row.text: continue
             row_text_clean = row.text.replace(" ", "").upper()
+            
             if target_clean in row_text_clean:
                 cols = row.find_elements(By.TAG_NAME, "td")
-                if len(cols) > 6 and "202" in row.text:
-                    found_date = ""
-                    found_vessel = ""
-                    found_term_voy = ""
-                    
-                    for idx, col in enumerate(cols):
-                        txt = col.text.strip()
-                        if txt.startswith("202") and len(txt) > 10 and not found_date:
-                            found_date = txt
-                        if target_clean in txt.replace(" ", "").upper():
-                            found_vessel = txt
-                        if idx == 2:
-                            found_term_voy = txt
-                    
-                    if found_date:
+                if len(cols) > 6:
+                    try:
+                        v_name = cols[3].text.strip()
+                        v_date = cols[6].text.strip()
+                        v_voyage = cols[2].text.strip()
+                        if not v_date.startswith("20"): continue
                         results.append({
                             "터미널": "BPT (부산항터미널)",
                             "구분": cols[0].text.strip(),
-                            "모선명": found_vessel if found_vessel else target_vessel,
-                            "터미널항차": found_term_voy,
-                            "접안일시": found_date,
+                            "모선명": v_name,
+                            "터미널항차": v_voyage,
+                            "접안일시": v_date,
                             "선사항차": "-" 
                         })
+                    except: continue
+    except Exception as e:
+        debug_log.append(f"BPT 에러: {e}")
         
-        driver.switch_to.default_content()
-
-    except Exception: pass
-    
     unique = []
     seen = set()
     for r in results:
         key = r['모선명'] + r['접안일시']
-        if key not in seen:
-            seen.add(key)
-            unique.append(r)
+        if key not in seen: seen.add(key); unique.append(r)
+    return unique
+
+# === 3. HJNC (신항 한진) [NEW!] ===
+def search_hjnc(driver, target_vessel, debug_log):
+    driver.delete_all_cookies()
+    driver.get("about:blank")
+    time.sleep(0.5)
+    
+    url = "https://www.hjnc.co.kr/esvc/vessel/berthScheduleT"
+    results = []
+    
+    try:
+        driver.get(url)
+        time.sleep(2)
+        
+        # 1. 옵션: '한달' 클릭
+        try:
+            # 텍스트가 '한달'인 라벨 클릭 (가장 안전한 방법)
+            labels = driver.find_elements(By.XPATH, "//label[contains(text(), '한달')]")
+            if labels:
+                driver.execute_script("arguments[0].click();", labels[0])
+                debug_log.append("HJNC: '한달' 옵션 클릭")
+        except: pass
+        time.sleep(0.5)
+        
+        # 2. '조회' 버튼 클릭
+        try:
+            btns = driver.find_elements(By.XPATH, "//button[contains(text(), '조회')] | //a[contains(text(), '조회')]")
+            for btn in btns:
+                if btn.is_displayed():
+                    driver.execute_script("arguments[0].click();", btn)
+                    debug_log.append("HJNC: '조회' 버튼 클릭")
+                    break
+        except: pass
+        
+        # 표 로딩 대기
+        time.sleep(4)
+
+        target_clean = target_vessel.replace(" ", "").upper()
+
+        # 3. 페이지 순회 (1페이지부터 5페이지까지)
+        for page in range(1, 6):
+            rows = driver.find_elements(By.TAG_NAME, "tr")
+            debug_log.append(f"HJNC {page}페이지: {len(rows)}줄 확인")
+            
+            for row in rows:
+                if "선박명" in row.text: continue # 헤더 제외
+                
+                row_text_clean = row.text.replace(" ", "").upper()
+                
+                # 해당 줄에 배 이름이 있으면 뜯어봄
+                if target_clean in row_text_clean:
+                    cols = row.find_elements(By.TAG_NAME, "td")
+                    
+                    # 칸이 충분히 있고 날짜가 있는 줄
+                    if len(cols) > 10 and "202" in row.text:
+                        try:
+                            # 사진 분석: 4번칸(선박명), 3번칸(모선항차), 10번칸(입항일시), 5번칸(선사항차)
+                            v_name = cols[4].text.strip()
+                            v_voyage = cols[3].text.strip()
+                            v_date = cols[10].text.strip()
+                            v_line_voyage = cols[5].text.strip()
+                            
+                            if target_clean in v_name.replace(" ", "").upper():
+                                results.append({
+                                    "터미널": "HJNC (신항 한진)",
+                                    "구분": "신항",
+                                    "모선명": v_name,
+                                    "터미널항차": v_voyage,
+                                    "접안일시": v_date,
+                                    "선사항차": v_line_voyage
+                                })
+                        except: continue
+            
+            # 다음 페이지 이동
+            if page < 5:
+                try:
+                    next_page = str(page + 1)
+                    # 텍스트가 '2', '3'인 링크(a 태그) 찾기
+                    page_links = driver.find_elements(By.XPATH, f"//a[text()='{next_page}']")
+                    if page_links and page_links[0].is_displayed():
+                        driver.execute_script("arguments[0].click();", page_links[0])
+                        time.sleep(3) # 다음 페이지 로딩 대기
+                    else:
+                        break # 다음 페이지 버튼 없으면 종료
+                except: break
+
+    except Exception as e:
+        debug_log.append(f"HJNC 에러: {e}")
+        
+    # 중복 제거
+    unique = []
+    seen = set()
+    for r in results:
+        key = r['모선명'] + r['접안일시']
+        if key not in seen: seen.add(key); unique.append(r)
     return unique
 
 # === UI ===
 st.set_page_config(page_title="부산항 통합 조회", page_icon="🚢", layout="wide")
-st.title("🚢 부산항 통합 모선 조회")
+st.title("🚢 부산항(북항+신항) 통합 조회기")
+st.markdown("**[북항]** 허치슨, BPT / **[신항]** HJNC (한진) 동시 검색")
 
 with st.form("search"):
     c1, c2 = st.columns([3, 1])
     with c1:
-        vessel_input = st.text_input("모선명", value="")
+        vessel_input = st.text_input("모선명 (Vessel Name)", value="")
     with c2:
         st.write("")
         st.write("")
-        btn = st.form_submit_button("🔍 조회 시작", type="primary")
+        btn = st.form_submit_button("🔍 전체 조회 시작", type="primary")
 
 if btn:
     if not vessel_input:
         st.warning("배 이름을 입력해주세요!")
     else:
-        status = st.status(f"'{vessel_input}' 조회 중...", expanded=True)
+        status = st.status(f"'{vessel_input}' 추적 중...", expanded=True)
         try:
             driver = get_driver()
             all_res = []
+            debug_logs = []
             
-            status.write("📍 허치슨 조회 중...")
+            status.write("📍 허치슨(북항) 수색 중...")
             all_res.extend(search_hktl(driver, vessel_input))
             
-            status.write("📍 BPT 조회 중...")
-            all_res.extend(search_bpt(driver, vessel_input))
+            status.write("📍 BPT(북항) 수색 중...")
+            all_res.extend(search_bpt(driver, vessel_input, debug_logs))
+            
+            status.write("📍 HJNC(신항 한진) 수색 중...")
+            all_res.extend(search_hjnc(driver, vessel_input, debug_logs))
             
             driver.quit()
-            status.update(label="완료!", state="complete", expanded=False)
+            status.update(label="조회 완료!", state="complete", expanded=False)
+            
+            # (옵션) 에러 확인용 로그
+            with st.expander("🛠️ 시스템 작동 로그 (문제 발생 시 확인)"):
+                for log in debug_logs:
+                    st.text(f"- {log}")
             
             if all_res:
+                # 전체 시간순 정렬
                 all_res.sort(key=lambda x: x['접안일시'])
-                st.success(f"총 {len(all_res)}건 발견")
+                st.success(f"✅ 총 {len(all_res)}건의 일정을 찾았습니다.")
+                
                 for i, res in enumerate(all_res):
-                    color = "blue" if "BPT" in res['터미널'] else "green"
+                    # 터미널별로 색깔 다르게 주기
+                    if "HJNC" in res['터미널']: color = "orange"
+                    elif "BPT" in res['터미널']: color = "blue"
+                    else: color = "green"
+                    
                     st.markdown(f"### {i+1}. :{color}[{res['터미널']} - {res['구분']}]")
                     c1, c2, c3 = st.columns(3)
                     c1.metric("모선명", res['모선명'])
-                    c2.metric("접안 일시", res['접안일시'])
+                    c2.metric("입항예정일시(ETA)", res['접안일시'])
                     c3.metric("터미널 모선항차", res['터미널항차'])
+                    if res.get('선사항차') and res.get('선사항차') != "-":
+                        st.caption(f"선사 항차: {res['선사항차']}")
                     st.divider()
             else:
-                st.error(f"'{vessel_input}' 결과가 없습니다.")
+                st.error(f"'{vessel_input}' 스케줄을 3곳 모두에서 찾지 못했습니다.")
         except Exception as e:
             st.error(f"오류가 발생했습니다: {e}")
