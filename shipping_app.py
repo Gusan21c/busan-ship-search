@@ -172,7 +172,7 @@ def search_bpt(driver, target_vessel, debug_log):
         if key not in seen: seen.add(key); unique.append(r)
     return unique
 
-# === 3. HJNC (신항 한진) - 완벽 수정판! ===
+# === 3. HJNC (신항 한진) - 스크롤 뚫기 모드 적용 ===
 def search_hjnc(driver, target_vessel, debug_log):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -185,13 +185,11 @@ def search_hjnc(driver, target_vessel, debug_log):
         driver.get(url)
         time.sleep(2)
         
-        # 1. '한달' 옵션 및 '조회' 버튼 아주 강력하게 강제 클릭
+        # 1. '한달' & '조회' 버튼 강제 클릭
         driver.execute_script("""
-            // 3번째 라디오 버튼('한달') 클릭
             var radios = document.querySelectorAll('input[type="radio"]');
             if(radios.length > 2) { radios[2].click(); }
             
-            // '조회' 글자가 포함된 버튼 무조건 클릭
             var btns = document.querySelectorAll('button, a, .btn');
             for(var i=0; i<btns.length; i++){
                 if(btns[i].innerText && btns[i].innerText.trim() === '조회') { 
@@ -200,44 +198,46 @@ def search_hjnc(driver, target_vessel, debug_log):
                 }
             }
         """)
-        debug_log.append("HJNC: '한달' 셋팅 및 '조회' 버튼 클릭 완료")
+        debug_log.append("HJNC: 조회 시작")
         
         target_clean = target_vessel.replace(" ", "").upper()
 
-        # 2. [핵심] 표가 온전히 뜰 때까지 눈 부릅뜨고 대기
+        # 2. 선생님이 찾아주신 몸통(scrollBody > tblMaster > tbody) 로딩 대기
         is_table_loaded = False
-        for _ in range(20): # 최대 20초 넉넉하게 기다림
-            # 선생님이 알려주신 tblMaster를 집중 타격!
-            rows = driver.find_elements(By.CSS_SELECTOR, "#tblMaster tbody tr")
+        for _ in range(20): 
+            # 정확한 CSS 경로 타격
+            rows = driver.find_elements(By.CSS_SELECTOR, "div.dataTables_scrollBody table#tblMaster tbody tr")
             if len(rows) > 0:
-                first_row = rows[0].text
-                # 아직 로딩 중이거나 텅 빈 메시지가 아니면 표가 뜬 것!
-                if "조회된" not in first_row and "Loading" not in first_row and "처리중" not in first_row:
+                # [핵심] 스크롤 때문에 숨겨진 글자도 읽을 수 있도록 textContent 사용
+                first_row = rows[0].get_attribute("textContent")
+                if first_row and "조회된" not in first_row and "Loading" not in first_row and "처리중" not in first_row:
                     is_table_loaded = True
-                    debug_log.append(f"HJNC: tblMaster 표 로딩 완벽 성공! (총 {len(rows)}줄 확인)")
+                    debug_log.append(f"HJNC: 표 완벽 로딩! (총 {len(rows)}줄)")
                     break
             time.sleep(1)
 
-        # 3. 데이터 긁어오기 (5페이지 순회)
+        # 3. 데이터 긁어오기 (5페이지)
         for page in range(1, 6):
-            # 매 페이지마다 표 다시 읽기
-            rows = driver.find_elements(By.CSS_SELECTOR, "#tblMaster tbody tr")
+            rows = driver.find_elements(By.CSS_SELECTOR, "div.dataTables_scrollBody table#tblMaster tbody tr")
             
             for row in rows:
-                row_text_clean = row.text.replace(" ", "").upper()
+                # [핵심] .text 대신 .get_attribute("textContent") 사용
+                row_text_raw = row.get_attribute("textContent")
+                if not row_text_raw: continue
                 
-                # 배 이름이 포함된 줄을 찾으면
+                row_text_clean = row_text_raw.replace(" ", "").upper()
+                
                 if target_clean in row_text_clean:
                     cols = row.find_elements(By.TAG_NAME, "td")
                     
                     if len(cols) > 10:
                         try:
-                            # 선생님 캡처본 기준 칸 번호
                             # 4:선박명 / 3:모선항차 / 10:입항일시 / 5:선사항차
-                            v_name = cols[4].text.strip()
-                            v_voyage = cols[3].text.strip()
-                            v_date = cols[10].text.strip()
-                            v_line_voyage = cols[5].text.strip()
+                            # 각 칸의 글자도 textContent로 확실하게 긁어옴
+                            v_name = cols[4].get_attribute("textContent").strip()
+                            v_voyage = cols[3].get_attribute("textContent").strip()
+                            v_date = cols[10].get_attribute("textContent").strip()
+                            v_line_voyage = cols[5].get_attribute("textContent").strip()
                             
                             if target_clean in v_name.replace(" ", "").upper():
                                 results.append({
@@ -254,13 +254,12 @@ def search_hjnc(driver, target_vessel, debug_log):
             if page < 5:
                 try:
                     next_page = str(page + 1)
-                    # 하단의 1, 2, 3... 페이지 링크 클릭
                     page_links = driver.find_elements(By.XPATH, f"//a[text()='{next_page}']")
-                    if page_links and page_links[0].is_displayed():
+                    if page_links:
                         driver.execute_script("arguments[0].click();", page_links[0])
-                        time.sleep(2) # 페이지 넘어가고 2초 대기
+                        time.sleep(2)
                     else:
-                        break # 페이지 끝
+                        break 
                 except: break
 
     except Exception as e:
@@ -272,7 +271,7 @@ def search_hjnc(driver, target_vessel, debug_log):
         key = r['모선명'] + r['접안일시']
         if key not in seen: seen.add(key); unique.append(r)
     return unique
-
+    
 # === UI ===
 st.set_page_config(page_title="부산항 통합 조회", page_icon="🚢", layout="wide")
 st.title("🚢 부산항(북항+신항) 통합 조회기")
@@ -334,3 +333,4 @@ if btn:
                 st.error(f"'{vessel_input}' 스케줄을 찾지 못했습니다.")
         except Exception as e:
             st.error(f"오류가 발생했습니다: {e}")
+
