@@ -139,6 +139,112 @@ def search_hjnc(driver, target_vessel):
             unique.append(r)
     return unique
 
+
+# === 2. DGT (신항 동원) ===
+def search_dgt(driver, target_vessel):
+    driver.delete_all_cookies()
+    driver.get("about:blank")
+    time.sleep(0.5)
+    
+    url = "https://info.dgtbusan.com/DGT/esvc/vessel/berthScheduleT"
+    results = []
+    
+    try:
+        driver.get(url)
+        time.sleep(2)
+        
+        # '한달' 버튼 클릭 로직 삭제 (기본값 사용)
+        
+        # '조회' 버튼 클릭
+        driver.execute_script("""
+            var btns = document.querySelectorAll('button, a, .btn');
+            for(var i=0; i<btns.length; i++){
+                if(btns[i].innerText && btns[i].innerText.trim() === '조회') { 
+                    btns[i].click(); 
+                    break; 
+                }
+            }
+        """)
+        
+        target_clean = target_vessel.replace(" ", "").upper()
+
+        # 표 로딩 대기
+        time.sleep(3) 
+        for _ in range(15): 
+            status = driver.execute_script("""
+                var rows = document.querySelectorAll('.dataTables_scrollBody table tbody tr');
+                if (rows.length === 0) return 'wait';
+                var text = rows[0].textContent;
+                if (text.includes('Loading') || text.includes('처리중')) return 'wait';
+                if (text.includes('조회된')) return 'empty';
+                return 'ready';
+            """)
+            if status == 'ready': break
+            time.sleep(1)
+
+        # 5페이지 순회하며 데이터 긁어오기
+        for page in range(1, 6):
+            time.sleep(1.5)
+            
+            # [핵심 수정] DGT 표 형식에 맞게 칸(td) 번호 변경
+            dgt_data = driver.execute_script("""
+                var results = [];
+                var rows = document.querySelectorAll('.dataTables_scrollBody table tbody tr');
+                for(var i=0; i<rows.length; i++) {
+                    var cols = rows[i].querySelectorAll('td');
+                    if(cols.length > 5) { // DGT는 6칸 이상이면 유효
+                        results.push({
+                            v_voyage: cols[2].textContent.trim(), // 모선항차(선사항차)
+                            v_name: cols[3].textContent.trim(),   // 모선명
+                            v_date: cols[5].textContent.trim(),   // 접안예정일시
+                            full_text: rows[i].textContent.toUpperCase()
+                        });
+                    }
+                }
+                return results;
+            """)
+            
+            if dgt_data:
+                for r in dgt_data:
+                    if target_clean in r['full_text'].replace(" ", ""):
+                        if target_clean in r['v_name'].replace(" ", "").upper():
+                            results.append({
+                                "터미널": "DGT (동원글로벌터미널)",
+                                "구분": "신항",
+                                "모선명": r['v_name'],
+                                "터미널항차": r['v_voyage'],
+                                "접안일시": r['v_date'],
+                                "선사항차": "-" # DGT는 항차가 하나로 묶여있음
+                            })
+            
+            # 다음 페이지 이동
+            if page < 5:
+                next_page = str(page + 1)
+                clicked = driver.execute_script(f"""
+                    var links = document.querySelectorAll('a.page-link');
+                    for(var i=0; i<links.length; i++) {{
+                        if(links[i].textContent.trim() === '{next_page}') {{
+                            links[i].click(); 
+                            return true;
+                        }}
+                    }}
+                    return false;
+                """)
+                if not clicked: 
+                    break 
+                time.sleep(2)
+
+    except Exception: pass
+        
+    unique = []
+    seen = set()
+    for r in results:
+        key = r['모선명'] + r['접안일시']
+        if key not in seen: 
+            seen.add(key)
+            unique.append(r)
+    return unique
+
 # === UI ===
 st.set_page_config(page_title="신항 통합 조회", page_icon="🚢", layout="wide")
 st.title("🚢 신항 통합 모선 조회")
