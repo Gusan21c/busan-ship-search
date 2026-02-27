@@ -7,10 +7,10 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 
-# === 브라우저 설정 (자동 감지 모드) ===
+# === 브라우저 설정 ===
 def get_driver():
     options = Options()
-    options.add_argument("--headless") # 화면 없이 실행
+    options.add_argument("--headless") 
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
@@ -29,7 +29,7 @@ def get_driver():
         
     return driver
 
-# === 1. HJNC (신항 한진) ===
+# === HJNC (신항 한진) ===
 def search_hjnc(driver, target_vessel):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -42,17 +42,12 @@ def search_hjnc(driver, target_vessel):
         driver.get(url)
         time.sleep(2)
         
-        # [수정 완결판] '한달' 라벨 글자를 직접 찾아서 정확히 클릭!
+        # [핵심 수정] 선생님이 찾아주신 진짜 '한달' 버튼(value="m1")을 직접 클릭!
         driver.execute_script("""
-            var labels = document.querySelectorAll('label');
-            for(var i=0; i<labels.length; i++) {
-                if(labels[i].innerText.includes('한달')) {
-                    labels[i].click();
-                    break;
-                }
-            }
+            var monthBtn = document.querySelector('input[name="chkPeriod"][value="m1"]');
+            if(monthBtn) { monthBtn.click(); }
         """)
-        time.sleep(0.5)
+        time.sleep(0.5) # 누르고 살짝 대기
         
         # '조회' 버튼 클릭
         driver.execute_script("""
@@ -68,9 +63,8 @@ def search_hjnc(driver, target_vessel):
         target_clean = target_vessel.replace(" ", "").upper()
 
         # 표 로딩 대기
-        time.sleep(3) # 검색 후 넉넉히 대기
+        time.sleep(3) 
         for _ in range(15): 
-            # 선생님이 확인해주신 경로 적용!
             status = driver.execute_script("""
                 var rows = document.querySelectorAll('.dataTables_scrollBody table tbody tr');
                 if (rows.length === 0) return 'wait';
@@ -86,7 +80,6 @@ def search_hjnc(driver, target_vessel):
         for page in range(1, 6):
             time.sleep(1)
             
-            # [핵심] 자바스크립트로 화면 안쪽 데이터 통째로 훔쳐오기
             hjnc_data = driver.execute_script("""
                 var results = [];
                 var rows = document.querySelectorAll('.dataTables_scrollBody table tbody tr');
@@ -105,10 +98,8 @@ def search_hjnc(driver, target_vessel):
                 return results;
             """)
             
-            # 파이썬에서 배 이름 매칭
             if hjnc_data:
                 for r in hjnc_data:
-                    # 띄어쓰기 싹 무시하고 대문자로 완벽 비교
                     if target_clean in r['full_text'].replace(" ", ""):
                         if target_clean in r['v_name'].replace(" ", "").upper():
                             results.append({
@@ -132,7 +123,7 @@ def search_hjnc(driver, target_vessel):
                     }}
                     return false;
                 """)
-                if not clicked: break # 더 이상 넘길 페이지가 없으면 종료
+                if not clicked: break
                 time.sleep(2)
 
     except Exception: pass
@@ -149,7 +140,7 @@ def search_hjnc(driver, target_vessel):
 # === UI ===
 st.set_page_config(page_title="신항 통합 조회", page_icon="🚢", layout="wide")
 st.title("🚢 신항 통합 모선 조회")
-st.markdown("**[신항] HJNC(한진) 터미널 조회**")
+st.markdown("**[신항] HJNC(한진) 터미널 전용 조회**")
 
 with st.form("search"):
     c1, c2 = st.columns([3, 1])
