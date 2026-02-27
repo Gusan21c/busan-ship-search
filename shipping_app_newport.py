@@ -233,7 +233,7 @@ def search_dgt(driver, target_vessel):
             unique.append(r)
     return unique
 
-# === 3. PNIT (부산국제신항) ===
+# === 3. PNIT (부산국제신항) - 카메라 장착 버전 ===
 def search_pnit(driver, target_vessel):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -244,46 +244,52 @@ def search_pnit(driver, target_vessel):
     
     try:
         driver.get(url)
-        time.sleep(2)
+        time.sleep(3)
         
-        # [핵심 1] 프레임(액자) 안으로 쏙 들어가기! (저번에 빼먹은 바보 코드 복구)
-        frames = driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
-        for frame in frames:
-            try:
-                driver.switch_to.default_content() 
-                driver.switch_to.frame(frame)      
-                if driver.find_elements(By.ID, "strEdDate"):
-                    break 
-            except: continue
-            
-        time.sleep(0.5)
+        # 📸 [찰칵 1] 사이트 접속 직후 로봇이 보는 화면
+        st.image(driver.get_screenshot_as_png(), caption="📸 1. PNIT 접속 직후 (표가 정상적으로 떴는지 확인)")
         
-        # 30일 뒤 날짜 계산 (HTML 표준 규격인 YYYY-MM-DD로 입력해야 내부적으로 먹힘)
+        # 30일 뒤 날짜 계산
         from datetime import datetime, timedelta
         target_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
         
-        # [핵심 2] 날짜 세팅 및 돋보기(submitbtn) 검색 버튼 일괄 타격!
+        # [초강력 날짜 입력] 자바스크립트 + 제이쿼리(jQuery) 이벤트까지 총동원
         driver.execute_script(f"""
             var edDate = document.getElementById('strEdDate');
             if(edDate) {{
                 edDate.value = '{target_date}';
                 edDate.dispatchEvent(new Event('change', {{ bubbles: true }}));
-            }}
-            
-            var btn = document.getElementById('submitbtn');
-            if(btn) {{
-                btn.click();
-            }} else if(document.submitForm) {{
-                document.submitForm.submit();
+                // PNIT 사이트가 제이쿼리를 쓴다면 강제로 변경 인식시키기
+                if(typeof window.jQuery !== 'undefined') {{
+                    window.jQuery('#strEdDate').trigger('change');
+                }}
             }}
         """)
+        time.sleep(1)
         
-        # 새로고침 대기 (30일치 표가 서버에서 날아올 때까지 5초 기다림)
+        # 📸 [찰칵 2] 날짜 변경을 시도한 직후 화면
+        st.image(driver.get_screenshot_as_png(), caption=f"📸 2. 날짜 변경 직후 (종료일이 {target_date} 로 바뀌었는지 확인!)")
+        
+        # [초강력 버튼 클릭] 사람처럼 마우스로 직접 찌르기
+        try:
+            # 1순위: 진짜 마우스를 이동시켜서 정확히 클릭 (Native Click)
+            search_btn = driver.find_element(By.ID, "submitbtn")
+            driver.execute_script("arguments[0].scrollIntoView(true);", search_btn)
+            time.sleep(0.5)
+            search_btn.click()
+        except:
+            # 2순위: JS로 강제 클릭
+            driver.execute_script("document.getElementById('submitbtn').click();")
+            
+        # 표가 새로 그려질 때까지 넉넉히 5초 대기
         time.sleep(5) 
+        
+        # 📸 [찰칵 3] 검색 버튼을 누르고 5초를 기다린 후 화면
+        st.image(driver.get_screenshot_as_png(), caption="📸 3. 검색 5초 후 (표 내용이 30일치로 늘어났는지 확인!)")
         
         target_clean = target_vessel.replace(" ", "").upper()
 
-        # 데이터 싹쓸이
+        # 데이터 긁어오기 (기존과 동일)
         pnit_data = driver.execute_script("""
             var results = [];
             var rows = document.querySelectorAll('.tblType_08 table tbody tr');
@@ -315,10 +321,8 @@ def search_pnit(driver, target_vessel):
                             "선사항차": r['v_line_voyage']
                         })
 
-    except Exception: pass
-    finally:
-        # 볼일 다 봤으면 원래 바깥 화면으로 복귀!
-        driver.switch_to.default_content()
+    except Exception as e:
+        st.error(f"PNIT 실행 중 에러 발생: {e}")
         
     unique = []
     seen = set()
