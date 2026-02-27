@@ -233,7 +233,7 @@ def search_dgt(driver, target_vessel):
             unique.append(r)
     return unique
 
-# === 3. PNIT (부산국제신항) ===
+# === 3. PNIT (부산국제신항) - 프레임(액자) 뚫기 완벽 적용 ===
 def search_pnit(driver, target_vessel):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -246,22 +246,34 @@ def search_pnit(driver, target_vessel):
         driver.get(url)
         time.sleep(2)
         
-        # 1. 파이썬으로 오늘 기준 정확히 '30일 뒤' 날짜 계산
+        # [핵심 1] 프레임(액자) 안으로 쏙 들어가기!
+        frames = driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
+        for frame in frames:
+            try:
+                driver.switch_to.default_content() # 일단 바깥으로 나옴
+                driver.switch_to.frame(frame)      # 액자 안으로 들어감
+                # 들어간 곳에 날짜 칸(strEdDate)이 있는지 확인!
+                if driver.find_elements(By.ID, "strEdDate"):
+                    break # 찾았으면 여기서 멈추고 계속 진행!
+            except: continue
+            
+        time.sleep(0.5)
+        
+        # 1. 30일 뒤 날짜 계산
         from datetime import datetime, timedelta
         target_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
         
-        # 2. 종료일(strEdDate) 칸에 30일 뒤 날짜 강제 입력
+        # 2. 날짜 강제 입력 (이제 프레임 안이라서 완벽하게 찾습니다)
         driver.execute_script(f"""
             var edDate = document.getElementById('strEdDate');
             if(edDate) {{
                 edDate.value = '{target_date}';
-                // [핵심] 사이트가 날짜 바뀐 것을 알아채도록 강제로 '변경 이벤트' 발생
                 edDate.dispatchEvent(new Event('change'));
             }}
         """)
         time.sleep(0.5)
         
-        # 3. [핵심] 선생님이 찾아주신 이미지 버튼의 고유 ID(submitbtn)를 정확히 타격!
+        # 3. 검색 버튼 강제 클릭
         driver.execute_script("""
             var btn = document.getElementById('submitbtn');
             if(btn) {
@@ -271,18 +283,17 @@ def search_pnit(driver, target_vessel):
             }
         """)
         
-        # 새로고침 대기 (이거 없으면 이전 1주일치 표를 읽어버림)
+        # 새로고침 대기 (30일치 표가 로딩될 때까지 5초 대기)
         time.sleep(5) 
         
         target_clean = target_vessel.replace(" ", "").upper()
 
-        # 4. 30일치 데이터 한방에 긁어오기
+        # 4. 데이터 싹쓸이
         pnit_data = driver.execute_script("""
             var results = [];
             var rows = document.querySelectorAll('.tblType_08 table tbody tr');
             for(var i=0; i<rows.length; i++) {
                 var cols = rows[i].querySelectorAll('td');
-                // 모선항차(2), 선사항차(3), 모선명(5), 접안일시(8)
                 if(cols.length > 8) {
                     results.push({
                         v_voyage: cols[2].textContent.trim(), 
@@ -310,6 +321,9 @@ def search_pnit(driver, target_vessel):
                         })
 
     except Exception: pass
+    finally:
+        # 작업이 끝나면 원래 바깥 화면으로 다시 빠져나옴
+        driver.switch_to.default_content()
         
     unique = []
     seen = set()
