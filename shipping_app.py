@@ -172,7 +172,7 @@ def search_bpt(driver, target_vessel, debug_log):
         if key not in seen: seen.add(key); unique.append(r)
     return unique
 
-# === 3. HJNC (신항 한진) - 스크롤 뚫기 모드 적용 ===
+# === 3. HJNC (신항 한진) - Stale Element 에러 완벽 차단! ===
 def search_hjnc(driver, target_vessel, debug_log):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -185,7 +185,6 @@ def search_hjnc(driver, target_vessel, debug_log):
         driver.get(url)
         time.sleep(2)
         
-        # 1. '한달' & '조회' 버튼 강제 클릭
         driver.execute_script("""
             var radios = document.querySelectorAll('input[type="radio"]');
             if(radios.length > 2) { radios[2].click(); }
@@ -202,38 +201,43 @@ def search_hjnc(driver, target_vessel, debug_log):
         
         target_clean = target_vessel.replace(" ", "").upper()
 
-        # 2. 선생님이 찾아주신 몸통(scrollBody > tblMaster > tbody) 로딩 대기
+        # 표 로딩 대기
         is_table_loaded = False
         for _ in range(20): 
-            # 정확한 CSS 경로 타격
             rows = driver.find_elements(By.CSS_SELECTOR, "div.dataTables_scrollBody table#tblMaster tbody tr")
             if len(rows) > 0:
-                # [핵심] 스크롤 때문에 숨겨진 글자도 읽을 수 있도록 textContent 사용
-                first_row = rows[0].get_attribute("textContent")
-                if first_row and "조회된" not in first_row and "Loading" not in first_row and "처리중" not in first_row:
-                    is_table_loaded = True
-                    debug_log.append(f"HJNC: 표 완벽 로딩! (총 {len(rows)}줄)")
-                    break
+                try:
+                    first_row = rows[0].get_attribute("textContent")
+                    if first_row and "조회된" not in first_row and "Loading" not in first_row and "처리중" not in first_row:
+                        is_table_loaded = True
+                        debug_log.append(f"HJNC: 표 완벽 로딩! (총 {len(rows)}줄)")
+                        break
+                except: pass
             time.sleep(1)
 
         # 3. 데이터 긁어오기 (5페이지)
         for page in range(1, 6):
-            rows = driver.find_elements(By.CSS_SELECTOR, "div.dataTables_scrollBody table#tblMaster tbody tr")
+            time.sleep(1) # 페이지 넘어가고 혹시 모를 로딩 대비 약간 쉼
             
-            for row in rows:
-                # [핵심] .text 대신 .get_attribute("textContent") 사용
-                row_text_raw = row.get_attribute("textContent")
-                if not row_text_raw: continue
-                
-                row_text_clean = row_text_raw.replace(" ", "").upper()
-                
-                if target_clean in row_text_clean:
-                    cols = row.find_elements(By.TAG_NAME, "td")
+            # [핵심] 몇 줄인지 숫자만 셈
+            current_rows = driver.find_elements(By.CSS_SELECTOR, "div.dataTables_scrollBody table#tblMaster tbody tr")
+            row_count = len(current_rows)
+            
+            # [핵심] 1번 줄, 2번 줄... 순서대로 매번 새롭게 화면에서 찾아옴 (Stale 방지)
+            for i in range(row_count):
+                try:
+                    # i번째 줄을 매번 새로 멱살 잡기!
+                    row = driver.find_elements(By.CSS_SELECTOR, "div.dataTables_scrollBody table#tblMaster tbody tr")[i]
                     
-                    if len(cols) > 10:
-                        try:
-                            # 4:선박명 / 3:모선항차 / 10:입항일시 / 5:선사항차
-                            # 각 칸의 글자도 textContent로 확실하게 긁어옴
+                    row_text_raw = row.get_attribute("textContent")
+                    if not row_text_raw: continue
+                    
+                    row_text_clean = row_text_raw.replace(" ", "").upper()
+                    
+                    if target_clean in row_text_clean:
+                        cols = row.find_elements(By.TAG_NAME, "td")
+                        
+                        if len(cols) > 10:
                             v_name = cols[4].get_attribute("textContent").strip()
                             v_voyage = cols[3].get_attribute("textContent").strip()
                             v_date = cols[10].get_attribute("textContent").strip()
@@ -248,7 +252,9 @@ def search_hjnc(driver, target_vessel, debug_log):
                                     "접안일시": v_date,
                                     "선사항차": v_line_voyage
                                 })
-                        except: continue
+                except Exception as e:
+                    # 중간에 에러가 나더라도 죽지 않고 다음 줄(i+1)로 조용히 넘어가기!
+                    continue
             
             # 다음 페이지 이동
             if page < 5:
@@ -257,13 +263,13 @@ def search_hjnc(driver, target_vessel, debug_log):
                     page_links = driver.find_elements(By.XPATH, f"//a[text()='{next_page}']")
                     if page_links:
                         driver.execute_script("arguments[0].click();", page_links[0])
-                        time.sleep(2)
+                        time.sleep(3) # [수정] 페이지 넘어가고 조금 더 넉넉히 대기
                     else:
                         break 
                 except: break
 
     except Exception as e:
-        debug_log.append(f"HJNC 에러 발생: {e}")
+        debug_log.append(f"HJNC 시스템 에러 발생: {e}")
         
     unique = []
     seen = set()
@@ -333,4 +339,5 @@ if btn:
                 st.error(f"'{vessel_input}' 스케줄을 찾지 못했습니다.")
         except Exception as e:
             st.error(f"오류가 발생했습니다: {e}")
+
 
