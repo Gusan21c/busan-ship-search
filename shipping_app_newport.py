@@ -234,6 +234,7 @@ def search_dgt(driver, target_vessel):
     return unique
 
 # === 3. PNIT (부산국제신항) ===
+# === 3. PNIT (부산국제신항) 완벽 수정본 ===
 def search_pnit(driver, target_vessel):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -246,50 +247,44 @@ def search_pnit(driver, target_vessel):
         driver.get(url)
         time.sleep(2)
         
-        # 1. 자바스크립트로 오늘 날짜 기준 '30일 뒤'를 계산해서 종료일(strEdDate)에 강제 입력
-        driver.execute_script("""
+        # 1. 파이썬으로 오늘 기준 정확히 '30일 뒤' 날짜 계산
+        from datetime import datetime, timedelta
+        target_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+        
+        # 2. 종료일(strEdDate) 칸에 30일 뒤 날짜 강제 입력
+        driver.execute_script(f"""
             var edDate = document.getElementById('strEdDate');
-            if(edDate) {
-                var d = new Date();
-                d.setDate(d.getDate() + 30); // 현재 날짜에 30일 더하기
-                
-                var yyyy = d.getFullYear();
-                var mm = String(d.getMonth() + 1).padStart(2, '0');
-                var dd = String(d.getDate()).padStart(2, '0');
-                
-                edDate.value = yyyy + '-' + mm + '-' + dd;
-            }
+            if(edDate) {{
+                edDate.value = '{target_date}';
+            }}
         """)
         time.sleep(0.5)
         
-        # 2. '검색' 버튼 클릭
+        # 3. 아주 강력한 '검색' 버튼 클릭
         driver.execute_script("""
-            var btns = document.querySelectorAll('button, a, .btn');
+            var clicked = false;
+            var btns = document.querySelectorAll('a, button, input');
             for(var i=0; i<btns.length; i++){
-                if(btns[i].innerText && btns[i].innerText.includes('검색')) { 
+                var txt = (btns[i].innerText || btns[i].value || btns[i].alt || "").trim();
+                if(txt.indexOf('검색') !== -1) { 
                     btns[i].click(); 
+                    clicked = true;
                     break; 
                 }
             }
+            // 버튼을 못 찾을 경우 폼(Form) 자체를 강제로 전송해버림
+            if(!clicked && document.submitForm) {
+                document.submitForm.submit();
+            }
         """)
+        
+        # [가장 중요한 핵심] 검색 누르면 페이지 새로고침됨!
+        # 여기서 5초를 안 기다려주면 방금 전 1주일 치 옛날 표를 긁어오게 됩니다.
+        time.sleep(5) 
         
         target_clean = target_vessel.replace(" ", "").upper()
 
-        # 3. 표 로딩 대기 (PNIT는 .tblType_08 클래스 사용)
-        time.sleep(3) 
-        for _ in range(15): 
-            status = driver.execute_script("""
-                var rows = document.querySelectorAll('.tblType_08 table tbody tr');
-                if (rows.length === 0) return 'wait';
-                var text = rows[0].textContent;
-                if (text.includes('Loading') || text.includes('처리중')) return 'wait';
-                if (text.includes('조회된') || text.includes('없습니다')) return 'empty';
-                return 'ready';
-            """)
-            if status == 'ready': break
-            time.sleep(1)
-
-        # 4. 데이터 긁어오기 (페이지 이동 없이 한 번에 싹쓸이)
+        # 4. 새로고침 완료된 30일 치 데이터 한방에 긁어오기
         pnit_data = driver.execute_script("""
             var results = [];
             var rows = document.querySelectorAll('.tblType_08 table tbody tr');
@@ -309,7 +304,6 @@ def search_pnit(driver, target_vessel):
             return results;
         """)
         
-        # 5. 파이썬에서 배 이름 매칭
         if pnit_data:
             for r in pnit_data:
                 if target_clean in r['full_text'].replace(" ", ""):
