@@ -234,9 +234,6 @@ def search_dgt(driver, target_vessel):
     return unique
 
 # === 3. PNIT (부산국제신항) ===
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-
 def search_pnit(driver, target_vessel):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -247,47 +244,48 @@ def search_pnit(driver, target_vessel):
     
     try:
         driver.get(url)
+        time.sleep(2)
         
-        # 1. 로딩 대기: '종료일' 칸이 화면에 뜰 때까지 눈 부릅뜨고 최대 10초 대기
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.ID, "strEdDate"))
-        )
+        # [가장 중요한 핵심] 프레임(액자) 안으로 쏙 들어가기!
+        frames = driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
+        for frame in frames:
+            try:
+                driver.switch_to.default_content() 
+                driver.switch_to.frame(frame)      
+                # 프레임 안에 들어와서 날짜 칸(strEdDate)이 있는지 확인
+                if driver.find_elements(By.ID, "strEdDate"):
+                    break 
+            except: continue
+            
+        time.sleep(0.5)
         
-        # 2. 30일 뒤 날짜 계산
+        # 30일 뒤 날짜 계산 (YYYY-MM-DD 형식)
         from datetime import datetime, timedelta
         target_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
         
-        # 3. 날짜 강제 주입 및 인식시키기
+        # 날짜 세팅 및 돋보기(submitbtn) 검색 버튼 일괄 타격!
+        # 이제 프레임 안이라서 완벽하게 찾아서 누릅니다.
         driver.execute_script(f"""
             var edDate = document.getElementById('strEdDate');
             if(edDate) {{
                 edDate.value = '{target_date}';
                 edDate.dispatchEvent(new Event('change', {{ bubbles: true }}));
             }}
-        """)
-        time.sleep(1) # 날짜 세팅 후 잠시 숨 고르기
-        
-        # 4. [핵심] 진짜 사람처럼 마우스로 돋보기 버튼 찌르기!
-        search_btn = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.ID, "submitbtn"))
-        )
-        # 로봇 시야에 버튼이 들어오도록 화면 스크롤 맞추기
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", search_btn)
-        time.sleep(0.5)
-        
-        try:
-            # 진짜 마우스 클릭 (매크로 차단 회피)
-            search_btn.click() 
-        except:
-            # 혹시라도 막히면 강제 클릭
-            driver.execute_script("arguments[0].click();", search_btn)
             
-        # 5. 검색 버튼을 눌렀으니, 30일치 데이터가 날아와서 표가 다시 그려질 때까지 5초 대기
+            var btn = document.getElementById('submitbtn');
+            if(btn) {{
+                btn.click();
+            }} else if(document.submitForm) {{
+                document.submitForm.submit();
+            }}
+        """)
+        
+        # 새로고침 대기 (30일치 표가 로딩될 때까지 5초 기다림)
         time.sleep(5) 
         
         target_clean = target_vessel.replace(" ", "").upper()
 
-        # 6. 데이터 싹쓸이
+        # 데이터 싹쓸이
         pnit_data = driver.execute_script("""
             var results = [];
             var rows = document.querySelectorAll('.tblType_08 table tbody tr');
@@ -319,9 +317,10 @@ def search_pnit(driver, target_vessel):
                             "선사항차": r['v_line_voyage']
                         })
 
-    except Exception as e: 
-        # 에러가 나더라도 프로그램이 죽지 않고 조용히 넘어가게 처리
-        pass
+    except Exception: pass
+    finally:
+        # 볼일 다 봤으면 원래 바깥 화면으로 복귀
+        driver.switch_to.default_content()
         
     unique = []
     seen = set()
