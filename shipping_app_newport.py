@@ -233,7 +233,9 @@ def search_dgt(driver, target_vessel):
             unique.append(r)
     return unique
 
-# === 3. PNIT (부산국제신항) - 카메라 장착 & 프레임 진입 버전 ===
+# === 3. PNIT (부산국제신항) - 카메라 & 진짜 조작 버전 ===
+from selenium.webdriver.common.keys import Keys
+
 def search_pnit(driver, target_vessel):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -246,53 +248,57 @@ def search_pnit(driver, target_vessel):
         driver.get(url)
         time.sleep(3) # 사이트 로딩 대기
         
-        # 📸 [찰칵 1] 사이트 접속 직후 로봇이 보는 화면
-        st.image(driver.get_screenshot_as_png(), caption="📸 1. PNIT 접속 직후 (아직 1주일치 표)")
+        # 📸 [찰칵 1] 사이트 접속 직후
+        st.image(driver.get_screenshot_as_png(), caption="📸 1. PNIT 접속 직후")
         
-        # [핵심] 프레임(액자) 안으로 쏙 들어가기!
-        frames = driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
-        for frame in frames:
-            try:
-                driver.switch_to.default_content() 
-                driver.switch_to.frame(frame)      
-                if driver.find_elements(By.ID, "strEdDate"):
-                    break 
-            except: continue
-            
+        # [프레임 뚫기] 액자 밖인지 안인지 확실하게 체크
+        driver.switch_to.default_content() 
+        if not driver.find_elements(By.ID, "strEdDate"):
+            frames = driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
+            for frame in frames:
+                try:
+                    driver.switch_to.default_content() 
+                    driver.switch_to.frame(frame)      
+                    if driver.find_elements(By.ID, "strEdDate"):
+                        break 
+                except: continue
+                
         time.sleep(0.5)
         
-        # 30일 뒤 날짜 계산 (YYYY-MM-DD 형식)
+        # 30일 뒤 날짜 계산
         from datetime import datetime, timedelta
         target_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
         
-        # 날짜 강제 주입
+        # [핵심] 선생님 아이디어 적용! 진짜 마우스로 클릭하고 키보드로 칩니다.
+        date_input = driver.find_element(By.ID, "strEdDate")
+        
+        # 1. 마우스로 날짜 칸을 클릭 (선생님 사진처럼 파랗게 활성화 시키기)
+        date_input.click()
+        time.sleep(0.5)
+        
+        # 2. 로봇이 키보드로 치면 꼬일 수 있으니, 확실한 JS로 숫자를 박아넣음
         driver.execute_script(f"""
-            var edDate = document.getElementById('strEdDate');
-            if(edDate) {{
-                edDate.value = '{target_date}';
-                edDate.dispatchEvent(new Event('change', {{ bubbles: true }}));
-            }}
-        """)
-        time.sleep(1) # 날짜가 화면에 반영될 때까지 1초 넉넉히 대기
+            arguments[0].value = '{target_date}';
+            arguments[0].dispatchEvent(new Event('input', {{ bubbles: true }}));
+            arguments[0].dispatchEvent(new Event('change', {{ bubbles: true }}));
+        """, date_input)
         
-        # 📸 [찰칵 2] 날짜 변경 직후 화면 (액자 안에서 바꾼 날짜가 잘 찍혔는지 확인!)
-        st.image(driver.get_screenshot_as_png(), caption=f"📸 2. 날짜 변경 직후 (종료일이 '{target_date}'로 바뀌었나요?)")
+        # 3. 키보드 '엔터(Enter)' 키를 쳐서 사람이 조작한 것처럼 웹사이트를 속임!
+        date_input.send_keys(Keys.ENTER)
+        time.sleep(1) 
         
-        # 돋보기(submitbtn) 검색 버튼 타격!
-        driver.execute_script("""
-            var btn = document.getElementById('submitbtn');
-            if(btn) {
-                btn.click();
-            } else if(document.submitForm) {
-                document.submitForm.submit();
-            }
-        """)
+        # 📸 [찰칵 2] 클릭 & 입력 완료 직후
+        st.image(driver.get_screenshot_as_png(), caption=f"📸 2. 날짜 칸 클릭 & 입력 후 ('{target_date}'로 바뀌었나요?)")
         
-        # 새로고침 대기 (30일치 표가 서버에서 날아올 때까지 5초 기다림)
+        # 돋보기 버튼 클릭
+        search_btn = driver.find_element(By.ID, "submitbtn")
+        driver.execute_script("arguments[0].click();", search_btn)
+        
+        # 새로고침 대기 (표 길어질 때까지 5초 대기)
         time.sleep(5) 
         
-        # 📸 [찰칵 3] 검색 버튼 누르고 5초 후 화면 (표가 길어졌는지 확인!)
-        st.image(driver.get_screenshot_as_png(), caption="📸 3. 검색 완료 후 (30일치 표로 늘어났나요?)")
+        # 📸 [찰칵 3] 돋보기 클릭 5초 후
+        st.image(driver.get_screenshot_as_png(), caption="📸 3. 검색 완료 후 (30일치로 늘어났나요?)")
         
         target_clean = target_vessel.replace(" ", "").upper()
 
@@ -329,9 +335,8 @@ def search_pnit(driver, target_vessel):
                         })
 
     except Exception as e: 
-        st.error(f"PNIT 작동 중 에러가 발생했습니다: {e}")
+        st.error(f"PNIT 작동 중 에러: {e}")
     finally:
-        # 볼일 다 봤으면 원래 바깥 화면으로 복귀!
         driver.switch_to.default_content()
         
     unique = []
