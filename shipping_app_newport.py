@@ -233,9 +233,11 @@ def search_dgt(driver, target_vessel):
             unique.append(r)
     return unique
 
-# === 3. PNIT (부산국제신항) - 카메라 & 진짜 조작 버전 ===
-from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
 
+# === 3. PNIT (부산국제신항) ===
 def search_pnit(driver, target_vessel):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -246,63 +248,62 @@ def search_pnit(driver, target_vessel):
     
     try:
         driver.get(url)
-        time.sleep(3) # 사이트 로딩 대기
         
-        # 📸 [찰칵 1] 사이트 접속 직후
-        st.image(driver.get_screenshot_as_png(), caption="📸 1. PNIT 접속 직후")
+        # 1. 완벽한 로딩 대기 (프레임 뻘짓 삭제! 눈앞에 날짜 칸이 뜰 때까지 대기)
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "strEdDate"))
+        )
+        time.sleep(1) 
         
-        # [프레임 뚫기] 액자 밖인지 안인지 확실하게 체크
-        driver.switch_to.default_content() 
-        if not driver.find_elements(By.ID, "strEdDate"):
-            frames = driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
-            for frame in frames:
-                try:
-                    driver.switch_to.default_content() 
-                    driver.switch_to.frame(frame)      
-                    if driver.find_elements(By.ID, "strEdDate"):
-                        break 
-                except: continue
-                
-        time.sleep(0.5)
+        # 📸 [찰칵 1] 
+        st.image(driver.get_screenshot_as_png(), caption="📸 1. 접속 직후 (에러 없이 화면이 잘 떴는지 확인!)")
         
-        # 30일 뒤 날짜 계산
+        # 30일 뒤 날짜
         from datetime import datetime, timedelta
         target_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
         
-        # [핵심] 선생님 아이디어 적용! 진짜 마우스로 클릭하고 키보드로 칩니다.
-        date_input = driver.find_element(By.ID, "strEdDate")
-        
-        # 1. 마우스로 날짜 칸을 클릭 (선생님 사진처럼 파랗게 활성화 시키기)
-        date_input.click()
-        time.sleep(0.5)
-        
-        # 2. 로봇이 키보드로 치면 꼬일 수 있으니, 확실한 JS로 숫자를 박아넣음
+        # 2. [초강력 무적 입력] 모바일용/PC용 숨겨진 칸 가리지 않고 모조리 30일 뒤로 세팅
         driver.execute_script(f"""
-            arguments[0].value = '{target_date}';
-            arguments[0].dispatchEvent(new Event('input', {{ bubbles: true }}));
-            arguments[0].dispatchEvent(new Event('change', {{ bubbles: true }}));
-        """, date_input)
+            var dates = document.getElementsByName('strEdDate');
+            for(var i=0; i<dates.length; i++) {{
+                dates[i].value = '{target_date}';
+                dates[i].setAttribute('value', '{target_date}');
+                // 사이트가 눈치채도록 모든 신호(Event) 발생
+                dates[i].dispatchEvent(new Event('input', {{ bubbles: true }}));
+                dates[i].dispatchEvent(new Event('change', {{ bubbles: true }}));
+                
+                // 제이쿼리(jQuery)를 쓰는 사이트라면 강제로 멱살 잡기
+                if(typeof window.jQuery !== 'undefined') {{
+                    window.jQuery(dates[i]).trigger('change');
+                }}
+            }}
+        """)
+        time.sleep(1)
         
-        # 3. 키보드 '엔터(Enter)' 키를 쳐서 사람이 조작한 것처럼 웹사이트를 속임!
-        date_input.send_keys(Keys.ENTER)
-        time.sleep(1) 
+        # 📸 [찰칵 2] 
+        st.image(driver.get_screenshot_as_png(), caption=f"📸 2. 날짜 강제 주입 후 (종료일이 '{target_date}'로 바뀌었나요?)")
         
-        # 📸 [찰칵 2] 클릭 & 입력 완료 직후
-        st.image(driver.get_screenshot_as_png(), caption=f"📸 2. 날짜 칸 클릭 & 입력 후 ('{target_date}'로 바뀌었나요?)")
+        # 3. 돋보기 버튼 타격 (제이쿼리 방식 + 일반 방식 모두 동원)
+        driver.execute_script("""
+            var btn = document.getElementById('submitbtn');
+            if(typeof window.jQuery !== 'undefined' && btn) {
+                window.jQuery(btn).trigger('click');
+            } else if(btn) {
+                btn.click();
+            } else if(document.submitForm) {
+                document.submitForm.submit();
+            }
+        """)
         
-        # 돋보기 버튼 클릭
-        search_btn = driver.find_element(By.ID, "submitbtn")
-        driver.execute_script("arguments[0].click();", search_btn)
-        
-        # 새로고침 대기 (표 길어질 때까지 5초 대기)
+        # 4. 서버 응답 및 표 재생성 대기
         time.sleep(5) 
         
-        # 📸 [찰칵 3] 돋보기 클릭 5초 후
-        st.image(driver.get_screenshot_as_png(), caption="📸 3. 검색 완료 후 (30일치로 늘어났나요?)")
+        # 📸 [찰칵 3] 
+        st.image(driver.get_screenshot_as_png(), caption="📸 3. 돋보기 클릭 5초 후 (표 내용이 늘어났나요?)")
         
         target_clean = target_vessel.replace(" ", "").upper()
 
-        # 데이터 싹쓸이
+        # 5. 데이터 싹쓸이
         pnit_data = driver.execute_script("""
             var results = [];
             var rows = document.querySelectorAll('.tblType_08 table tbody tr');
@@ -335,9 +336,7 @@ def search_pnit(driver, target_vessel):
                         })
 
     except Exception as e: 
-        st.error(f"PNIT 작동 중 에러: {e}")
-    finally:
-        driver.switch_to.default_content()
+        st.error(f"PNIT 작동 중 에러 발생: {e}")
         
     unique = []
     seen = set()
