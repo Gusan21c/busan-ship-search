@@ -139,8 +139,7 @@ def search_hjnc(driver, target_vessel):
             unique.append(r)
     return unique
 
-
-# === 2. DGT (신항 동원) ===
+# === 2. DGT (동원글로벌터미널) - 표 경로 완벽 수정본 ===
 def search_dgt(driver, target_vessel):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -151,32 +150,20 @@ def search_dgt(driver, target_vessel):
     
     try:
         driver.get(url)
-        time.sleep(2)
-        
-        # '한달' 버튼 클릭 로직 삭제 (기본값 사용)
-        
-        # '조회' 버튼 클릭
-        driver.execute_script("""
-            var btns = document.querySelectorAll('button, a, .btn');
-            for(var i=0; i<btns.length; i++){
-                if(btns[i].innerText && btns[i].innerText.trim() === '조회') { 
-                    btns[i].click(); 
-                    break; 
-                }
-            }
-        """)
+        # 접속하자마자 표가 뜨므로, 굳이 '조회' 버튼을 누를 필요가 없습니다.
         
         target_clean = target_vessel.replace(" ", "").upper()
 
         # 표 로딩 대기
         time.sleep(3) 
         for _ in range(15): 
+            # [핵심 수정] 껍데기(.dataTables_scrollBody) 빼고, 진짜 표(#tblMaster)만 찾습니다!
             status = driver.execute_script("""
-                var rows = document.querySelectorAll('.dataTables_scrollBody table tbody tr');
+                var rows = document.querySelectorAll('#tblMaster tbody tr');
                 if (rows.length === 0) return 'wait';
                 var text = rows[0].textContent;
                 if (text.includes('Loading') || text.includes('처리중')) return 'wait';
-                if (text.includes('조회된')) return 'empty';
+                if (text.includes('조회된') || text.includes('없습니다')) return 'empty';
                 return 'ready';
             """)
             if status == 'ready': break
@@ -186,17 +173,18 @@ def search_dgt(driver, target_vessel):
         for page in range(1, 6):
             time.sleep(1.5)
             
-            # [핵심 수정] DGT 표 형식에 맞게 칸(td) 번호 변경 (3번: 모선명, 2번: 항차, 5번: 접안일시)
+            # [핵심 수정] 여기서도 #tblMaster 로 경로를 확실하게 수정했습니다.
             dgt_data = driver.execute_script("""
                 var results = [];
-                var rows = document.querySelectorAll('.dataTables_scrollBody table tbody tr');
+                var rows = document.querySelectorAll('#tblMaster tbody tr');
                 for(var i=0; i<rows.length; i++) {
                     var cols = rows[i].querySelectorAll('td');
-                    if(cols.length > 5) { // DGT는 6칸 이상이면 유효
+                    // DGT는 배 이름이 3번(4번째 칸), 접안일시가 5번(6번째 칸)에 있습니다.
+                    if(cols.length > 5) {
                         results.push({
-                            v_voyage: cols[2].textContent.trim(), // 모선항차(선사항차)
-                            v_name: cols[3].textContent.trim(),   // 모선명
-                            v_date: cols[5].textContent.trim(),   // 접안예정일시
+                            v_voyage: cols[2].textContent.trim(), 
+                            v_name: cols[3].textContent.trim(),   
+                            v_date: cols[5].textContent.trim(),   
                             full_text: rows[i].textContent.toUpperCase()
                         });
                     }
@@ -214,7 +202,7 @@ def search_dgt(driver, target_vessel):
                                 "모선명": r['v_name'],
                                 "터미널항차": r['v_voyage'],
                                 "접안일시": r['v_date'],
-                                "선사항차": "-" # DGT는 항차가 하나로 묶여있음
+                                "선사항차": "-" 
                             })
             
             # 다음 페이지 이동
