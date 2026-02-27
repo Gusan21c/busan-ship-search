@@ -237,7 +237,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 
-# === 3. PNIT (부산국제신항) ===
+# === 3. PNIT (부산국제신항) - 기본 검색(1주일) 전용 ===
 def search_pnit(driver, target_vessel):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -248,62 +248,20 @@ def search_pnit(driver, target_vessel):
     
     try:
         driver.get(url)
-        # 1. 사이트 진입 후 넉넉히 4초 대기 (이때 파이썬 에러가 날 일은 절대 없습니다)
+        
+        # 사이트 접속 후 기본 1주일치 표가 뜰 때까지 넉넉히 4초 대기
+        # (날짜 변경이나 검색 클릭 없이, 화면에 뜬 그대로 긁어옵니다)
         time.sleep(4) 
-        
-        # 📸 [찰칵 1] 무조건 1번 사진부터 찍고 시작합니다.
-        st.image(driver.get_screenshot_as_png(), caption="📸 1. 접속 직후 (흰 화면인지, 정상 표인지 확인해주세요!)")
-        
-        # 30일 뒤 날짜
-        from datetime import datetime, timedelta
-        target_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
-        
-        # 2. [자바스크립트 풀파워] 날짜 세팅 및 검색 클릭
-        driver.execute_script(f"""
-            // 날짜 칸을 ID나 Name으로 확실하게 찾기
-            var edDate = document.getElementById('strEdDate') || document.querySelector('input[name="strEdDate"]');
-            
-            if (edDate) {{
-                // 강제로 날짜 값을 꽂아 넣음
-                edDate.value = '{target_date}';
-                edDate.setAttribute('value', '{target_date}');
-                
-                // 사람이 조작한 것처럼 온갖 이벤트를 다 발생시킴
-                edDate.dispatchEvent(new Event('focus', {{ bubbles: true }}));
-                edDate.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                edDate.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                edDate.dispatchEvent(new Event('blur', {{ bubbles: true }}));
-                
-                if(typeof window.jQuery !== 'undefined') {{
-                    window.jQuery(edDate).trigger('change');
-                }}
-            }}
-            
-            // 0.5초 뒤에 돋보기 버튼 클릭
-            setTimeout(function() {{
-                var btn = document.getElementById('submitbtn') || document.querySelector('img[src*="btn_search"]');
-                if (btn) {{
-                    btn.click();
-                }} else if (document.submitForm) {{
-                    document.submitForm.submit();
-                }}
-            }}, 500);
-        """)
-        
-        # 3. 검색 버튼 누르고 서버에서 데이터가 올 때까지 6초 대기
-        time.sleep(6) 
-        
-        # 📸 [찰칵 2] 
-        st.image(driver.get_screenshot_as_png(), caption=f"📸 2. 검색 수행 후 (종료일이 '{target_date}'로 바뀌고 표가 길어졌나요?)")
         
         target_clean = target_vessel.replace(" ", "").upper()
 
-        # 4. 데이터 싹쓸이
+        # 데이터 싹쓸이
         pnit_data = driver.execute_script("""
             var results = [];
             var rows = document.querySelectorAll('.tblType_08 table tbody tr');
             for(var i=0; i<rows.length; i++) {
                 var cols = rows[i].querySelectorAll('td');
+                // 사진 분석 기준: 모선항차(2), 선사항차(3), 모선명(5), 접안일시(8)
                 if(cols.length > 8) {
                     results.push({
                         v_voyage: cols[2].textContent.trim(), 
@@ -330,8 +288,9 @@ def search_pnit(driver, target_vessel):
                             "선사항차": r['v_line_voyage']
                         })
 
-    except Exception as e: 
-        st.error(f"PNIT 작동 중 에러 발생: {e}")
+    except Exception: 
+        # 에러가 나더라도 무시하고 부드럽게 넘어감
+        pass
         
     unique = []
     seen = set()
