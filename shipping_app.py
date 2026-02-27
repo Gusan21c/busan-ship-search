@@ -6,8 +6,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 
 # === 브라우저 설정 ===
 def get_driver():
@@ -46,7 +44,7 @@ def get_driver():
         
     return driver
 
-# === 1. 허치슨 (북항) ===
+# === 1. 허치슨 (북항 - 건드리지 않음) ===
 def search_hktl(driver, target_vessel):
     url = "https://custom.hktl.com/jsp/T01/sunsuk.jsp"
     results = []
@@ -101,7 +99,7 @@ def search_hktl(driver, target_vessel):
         if key not in seen: seen.add(key); unique.append(r)
     return unique
 
-# === 2. BPT (북항) - 대기 로직 강화 ===
+# === 2. BPT (북항 - 건드리지 않음) ===
 def search_bpt(driver, target_vessel, debug_log):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -121,30 +119,23 @@ def search_bpt(driver, target_vessel, debug_log):
         time.sleep(0.5)
 
         try:
-            inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='text']")
-            if inputs:
-                target_box = inputs[-1]
-                target_box.click()
-                time.sleep(0.2)
-                target_box.send_keys(Keys.ENTER)
-                debug_log.append("BPT: 조회 엔터 입력 완료")
-        except: pass
-
-        # [핵심] output 프레임으로 이동하고 표가 뜰 때까지 대기
+            driver.execute_script("""
+                var btns = document.querySelectorAll('img, a, button');
+                for(var i=0; i<btns.length; i++) {
+                    if(btns[i].alt && btns[i].alt.includes('조회')) { btns[i].click(); return; }
+                    if(btns[i].innerText && btns[i].innerText.includes('조회')) { btns[i].click(); return; }
+                }
+            """)
+        except Exception as e: pass
         time.sleep(2)
+
         try:
             driver.switch_to.frame("output")
-            debug_log.append("BPT: output 프레임 진입 성공")
-            
-            # 표가 뜰 때까지 최대 10초 대기
             for _ in range(10):
                 rows = driver.find_elements(By.TAG_NAME, "tr")
-                if len(rows) > 10:
-                    debug_log.append(f"BPT: 표 확인됨 (총 {len(rows)}줄)")
-                    break
+                if len(rows) > 10: break
                 time.sleep(1)
-        except Exception as e:
-            debug_log.append(f"BPT 대기 에러: {e}")
+        except: pass
 
         rows = driver.find_elements(By.TAG_NAME, "tr")
         target_clean = target_vessel.replace(" ", "").upper()
@@ -170,8 +161,7 @@ def search_bpt(driver, target_vessel, debug_log):
                             "선사항차": "-" 
                         })
                     except: continue
-    except Exception as e:
-        debug_log.append(f"BPT 전체 에러: {e}")
+    except: pass
     finally:
         driver.switch_to.default_content()
         
@@ -182,7 +172,7 @@ def search_bpt(driver, target_vessel, debug_log):
         if key not in seen: seen.add(key); unique.append(r)
     return unique
 
-# === 3. HJNC (신항 한진) : 선생님이 찾아주신 scrollBody 정밀 타격 ===
+# === 3. HJNC (신항 한진) - 완벽 수정판! ===
 def search_hjnc(driver, target_vessel, debug_log):
     driver.delete_all_cookies()
     driver.get("about:blank")
@@ -195,50 +185,54 @@ def search_hjnc(driver, target_vessel, debug_log):
         driver.get(url)
         time.sleep(2)
         
-        # 1. '한달' 옵션 및 '조회' 버튼 자바스크립트로 강제 클릭
-        try:
-            driver.execute_script("""
-                var labels = document.querySelectorAll('label');
-                for(var i=0; i<labels.length; i++){
-                    if(labels[i].innerText.includes('한달')) { labels[i].click(); break; }
+        # 1. '한달' 옵션 및 '조회' 버튼 아주 강력하게 강제 클릭
+        driver.execute_script("""
+            // 3번째 라디오 버튼('한달') 클릭
+            var radios = document.querySelectorAll('input[type="radio"]');
+            if(radios.length > 2) { radios[2].click(); }
+            
+            // '조회' 글자가 포함된 버튼 무조건 클릭
+            var btns = document.querySelectorAll('button, a, .btn');
+            for(var i=0; i<btns.length; i++){
+                if(btns[i].innerText && btns[i].innerText.trim() === '조회') { 
+                    btns[i].click(); 
+                    break; 
                 }
-            """)
-            time.sleep(0.5)
-            driver.execute_script("""
-                var btns = document.querySelectorAll('button, a');
-                for(var i=0; i<btns.length; i++){
-                    if(btns[i].innerText.includes('조회')) { btns[i].click(); break; }
-                }
-            """)
-            debug_log.append("HJNC: 조회 실행 완료")
-        except: pass
-
+            }
+        """)
+        debug_log.append("HJNC: '한달' 셋팅 및 '조회' 버튼 클릭 완료")
+        
         target_clean = target_vessel.replace(" ", "").upper()
 
-        # 3. [핵심 수정] 선생님이 찾아주신 dataTables_scrollBody 안의 줄만 스캔!
+        # 2. [핵심] 표가 온전히 뜰 때까지 눈 부릅뜨고 대기
         is_table_loaded = False
-        for _ in range(15): # 최대 15초 대기
-            # 화면 전체가 아니라, 진짜 데이터가 들어가는 안쪽 몸통만 노립니다.
-            rows = driver.find_elements(By.CSS_SELECTOR, ".dataTables_scrollBody tbody tr")
-            if len(rows) > 5 and "조회된" not in rows[0].text: 
-                is_table_loaded = True
-                debug_log.append(f"HJNC: 데이터 테이블 로딩 성공! (총 {len(rows)}줄)")
-                break
+        for _ in range(20): # 최대 20초 넉넉하게 기다림
+            # 선생님이 알려주신 tblMaster를 집중 타격!
+            rows = driver.find_elements(By.CSS_SELECTOR, "#tblMaster tbody tr")
+            if len(rows) > 0:
+                first_row = rows[0].text
+                # 아직 로딩 중이거나 텅 빈 메시지가 아니면 표가 뜬 것!
+                if "조회된" not in first_row and "Loading" not in first_row and "처리중" not in first_row:
+                    is_table_loaded = True
+                    debug_log.append(f"HJNC: tblMaster 표 로딩 완벽 성공! (총 {len(rows)}줄 확인)")
+                    break
             time.sleep(1)
 
-        # 4. 5페이지 순회
+        # 3. 데이터 긁어오기 (5페이지 순회)
         for page in range(1, 6):
-            # 진짜 데이터 줄만 가져옴
-            rows = driver.find_elements(By.CSS_SELECTOR, ".dataTables_scrollBody tbody tr")
+            # 매 페이지마다 표 다시 읽기
+            rows = driver.find_elements(By.CSS_SELECTOR, "#tblMaster tbody tr")
             
             for row in rows:
                 row_text_clean = row.text.replace(" ", "").upper()
                 
+                # 배 이름이 포함된 줄을 찾으면
                 if target_clean in row_text_clean:
                     cols = row.find_elements(By.TAG_NAME, "td")
                     
                     if len(cols) > 10:
                         try:
+                            # 선생님 캡처본 기준 칸 번호
                             # 4:선박명 / 3:모선항차 / 10:입항일시 / 5:선사항차
                             v_name = cols[4].text.strip()
                             v_voyage = cols[3].text.strip()
@@ -260,16 +254,17 @@ def search_hjnc(driver, target_vessel, debug_log):
             if page < 5:
                 try:
                     next_page = str(page + 1)
+                    # 하단의 1, 2, 3... 페이지 링크 클릭
                     page_links = driver.find_elements(By.XPATH, f"//a[text()='{next_page}']")
                     if page_links and page_links[0].is_displayed():
                         driver.execute_script("arguments[0].click();", page_links[0])
                         time.sleep(2) # 페이지 넘어가고 2초 대기
                     else:
-                        break 
+                        break # 페이지 끝
                 except: break
 
     except Exception as e:
-        debug_log.append(f"HJNC 에러: {e}")
+        debug_log.append(f"HJNC 에러 발생: {e}")
         
     unique = []
     seen = set()
@@ -277,7 +272,7 @@ def search_hjnc(driver, target_vessel, debug_log):
         key = r['모선명'] + r['접안일시']
         if key not in seen: seen.add(key); unique.append(r)
     return unique
-    
+
 # === UI ===
 st.set_page_config(page_title="부산항 통합 조회", page_icon="🚢", layout="wide")
 st.title("🚢 부산항(북항+신항) 통합 조회기")
@@ -314,8 +309,7 @@ if btn:
             driver.quit()
             status.update(label="조회 완료!", state="complete", expanded=False)
             
-            # 시스템 로그를 볼 수 있도록 유지 (디버깅용)
-            with st.expander("🛠️ 시스템 작동 로그 (결과가 이상할 때 열어보세요)"):
+            with st.expander("🛠️ 시스템 작동 로그 (디버깅용)"):
                 for log in debug_logs:
                     st.text(f"- {log}")
             
@@ -337,8 +331,6 @@ if btn:
                         st.caption(f"선사 항차: {res['선사항차']}")
                     st.divider()
             else:
-                st.error(f"'{vessel_input}' 스케줄을 3곳 모두에서 찾지 못했습니다.")
+                st.error(f"'{vessel_input}' 스케줄을 찾지 못했습니다.")
         except Exception as e:
             st.error(f"오류가 발생했습니다: {e}")
-
-
